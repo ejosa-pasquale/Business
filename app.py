@@ -405,10 +405,33 @@ with finance_tab:
         kwh_sold_year1_fin = float(min(demand_kwh_year1, cap_kwh_year))
         lost_kwh_year1 = float(max(0.0, demand_kwh_year1 - cap_kwh_year))
 
+        # --- Lato domanda (auto / sessioni) per rendere la stima "reale"
+        # Nota: assumiamo 1 sessione ~ 1 auto che ricarica (modello semplice)
+        bev_vehicles_day = float(vehicles_per_day) * float(bev_share)
+        vehicles_charging_day = float(bev_vehicles_day) * float(share_bev_that_charge)
+        sessions_day = float(vehicles_charging_day)
+        sessions_dc_day = sessions_day * float(share_sessions_dc)
+        sessions_ac_day = sessions_day - sessions_dc_day
+        vehicles_charging_year = sessions_day * 365.0
+        demand_vs_capacity = float(demand_kwh_year1) / max(float(cap_kwh_year), 1e-9)
+
         st.metric("CAPEX totale", eur(capex))
         st.metric("OPEX fisso anno 1", eur(fixed_opex_year1))
         st.metric("Potenza installata", f"{num(installed_power_kw, 0)} kW")
         st.metric("kWh vendibili (Year 1, a target_util)", num(kwh_sold_year1_fin, 0))
+
+        st.markdown("#### Domanda (Year 1)")
+        d1, d2, d3, d4 = st.columns(4)
+        d1.metric("Auto/giorno (tot)", num(vehicles_per_day, 0))
+        d2.metric("BEV/giorno", num(bev_vehicles_day, 1))
+        d3.metric("Auto che ricaricano/giorno", num(vehicles_charging_day, 1))
+        d4.metric("Auto che ricaricano/anno", num(vehicles_charging_year, 0))
+
+        d5, d6, d7, d8 = st.columns(4)
+        d5.metric("Sessioni AC/giorno", num(sessions_ac_day, 1))
+        d6.metric("Sessioni DC/giorno", num(sessions_dc_day, 1))
+        d7.metric("kWh richiesti (Year 1)", num(demand_kwh_year1, 0))
+        d8.metric("Domanda/Capacità (a target_util)", pct(demand_vs_capacity))
 
         if lost_kwh_year1 > 1:
             st.warning(f"Domanda > capacità: perdi ~{num(lost_kwh_year1,0)} kWh nel Year 1 (a target_util).")
