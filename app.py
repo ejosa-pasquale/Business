@@ -197,7 +197,7 @@ if demand_mode.startswith("Ho dati"):
     with c1:
         st.markdown("**Carica un CSV con serie temporale** (timestamp + occupazione oppure posti liberi).")
         up = st.file_uploader("CSV parcheggio", type=["csv", "tsv"])
-        sample = st.checkbox("Usa un esempio fittizio (sample_data)", value= false)
+        sample = st.checkbox("Usa un esempio fittizio (sample_data)", value= (up is none) ) # usa sample solo se non c’è upload
 
         if up is not None:
             raw = up.read()
