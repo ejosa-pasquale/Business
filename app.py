@@ -205,7 +205,11 @@ if demand_mode.startswith("Ho dati"):
         else:
             df_raw = None
             if sample:
-                df_raw = pd.read_csv("sample_data/parking_sample.csv")
+                try:
+                    df_raw = pd.read_csv("sample_data/parking_sample.csv")
+                except FileNotFoundError:
+                    st.warning("sample_data/parking_sample.csv non presente su questo deploy. Carica un CSV oppure disattiva sample.")
+                    df_raw = None
 
         if df_raw is not None:
             try:
