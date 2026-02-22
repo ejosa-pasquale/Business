@@ -1,99 +1,104 @@
-# finance.py - flat layout finance helpers
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Dict, List, Tuple
+
 import numpy as np
-import pandas as pd
+import numpy_financial as npf
 
 
-def build_cashflows(
-    years: int,
-    demand_kwh_year: float,
-    annual_growth_kwh: float,
-    sell_price_kwh: float,
-    energy_cost_kwh: float,
-    roaming_fee_pct: float,
-    n_ac: int,
-    n_dc: int,
-    opex_ac_year: float,
-    opex_dc_year: float,
-    fixed_opex_year: float,
-    capex_total: float,
-) -> dict:
-    years = int(years)
-    demand_kwh_year = float(demand_kwh_year)
-    annual_growth_kwh = float(annual_growth_kwh)
+@dataclass
+class FinanceInputs:
+    years: int
+    discount_rate: float
 
-    kwh = []
-    rev = []
-    c_energy = []
-    c_roam = []
-    c_maint = []
-    c_fixed = []
-    net = []
+    capex_total: float
 
-    for y in range(years + 1):
-        if y == 0:
-            k = 0.0
-            r = 0.0
-            ce = 0.0
-            cr = 0.0
-            cm = 0.0
-            cf = 0.0
-            n = -float(capex_total)
-        else:
-            k = demand_kwh_year * ((1.0 + annual_growth_kwh) ** (y - 1))
-            r = k * float(sell_price_kwh)
-            ce = k * float(energy_cost_kwh)
-            cr = r * float(roaming_fee_pct)
-            cm = int(n_ac) * float(opex_ac_year) + int(n_dc) * float(opex_dc_year)
-            cf = float(fixed_opex_year)
-            n = r - ce - cr - cm - cf
+    price_sell_eur_per_kwh: float
+    price_buy_eur_per_kwh: float
+    kwh_sold_year1: float
+    kwh_growth_yoy: float
 
-        kwh.append(k)
-        rev.append(r)
-        c_energy.append(ce)
-        c_roam.append(cr)
-        c_maint.append(cm)
-        c_fixed.append(cf)
-        net.append(n)
+    fixed_opex_year1: float
+    fixed_opex_growth_yoy: float
 
-    table = pd.DataFrame({
-        "Year": list(range(years + 1)),
-        "kWh": kwh,
-        "Revenue": rev,
-        "EnergyCost": c_energy,
-        "RoamingFees": c_roam,
-        "Maintenance": c_maint,
-        "FixedOpex": c_fixed,
-        "NetCashflow": net,
-    })
-
-    return {"table": table, "net_cashflow": net}
+    variable_opex_per_kwh: float  # e.g., roaming %, payment fees
 
 
-def npv(cashflows: list, discount_rate: float) -> float:
-    dr = float(discount_rate)
-    total = 0.0
-    for t, cf in enumerate(cashflows):
-        total += float(cf) / ((1.0 + dr) ** t)
-    return total
+@dataclass
+class FinanceResult:
+    cashflows: List[float]
+    npv: float
+    irr: float
+    payback_year: float
+    revenue_year1: float
+    ebitda_year1: float
 
 
-def irr(cashflows: list):
+def build_cashflows(inp: FinanceInputs) -> Tuple[List[float], Dict[str, np.ndarray]]:
+    years = int(inp.years)
+    r = float(inp.discount_rate)
+
+    kwh = np.array([inp.kwh_sold_year1 * ((1 + inp.kwh_growth_yoy) ** i) for i in range(years)])
+
+    revenue = kwh * inp.price_sell_eur_per_kwh
+    energy_cost = kwh * inp.price_buy_eur_per_kwh
+    var_cost = kwh * inp.variable_opex_per_kwh
+
+    fixed = np.array([inp.fixed_opex_year1 * ((1 + inp.fixed_opex_growth_yoy) ** i) for i in range(years)])
+
+    ebitda = revenue - energy_cost - var_cost - fixed
+
+    # cashflows: year0 capex outflow, then annual EBITDA (simplified, no taxes/depr.)
+    cfs = [-inp.capex_total] + ebitda.tolist()
+    details = {
+        "kwh": kwh,
+        "revenue": revenue,
+        "energy_cost": energy_cost,
+        "var_cost": var_cost,
+        "fixed_opex": fixed,
+        "ebitda": ebitda,
+    }
+    return cfs, details
+
+
+def npv_irr_payback(cashflows: List[float], discount_rate: float) -> Tuple[float, float, float]:
+    npv = float(npf.npv(discount_rate, cashflows))
     try:
-        return float(np.irr(cashflows))
+        irr = float(npf.irr(cashflows))
     except Exception:
-        return None
+        irr = float('nan')
 
-
-def payback_year(cashflows: list):
+    # discounted payback
     cum = 0.0
+    payback = float('inf')
     for t, cf in enumerate(cashflows):
-        cum += float(cf)
-        if t > 0 and cum >= 0:
-            prev = cum - float(cf)
-            if float(cf) == 0:
-                return float(t)
-            frac = (0 - prev) / float(cf)
-            return float(t - 1) + float(frac)
-    return None
+        disc = cf / ((1 + discount_rate) ** t)
+        prev = cum
+        cum += disc
+        if t > 0 and prev < 0 <= cum:
+            # linear interpolation
+            frac = (0 - prev) / max(disc, 1e-9)
+            payback = (t - 1) + frac
+            break
+    return npv, irr, payback
+
+
+def evaluate_finance(inp: FinanceInputs) -> Tuple[FinanceResult, Dict[str, np.ndarray]]:
+    cfs, details = build_cashflows(inp)
+    npv, irr, payback = npv_irr_payback(cfs, inp.discount_rate)
+
+    revenue_y1 = float(details["revenue"][0])
+    ebitda_y1 = float(details["ebitda"][0])
+
+    return (
+        FinanceResult(
+            cashflows=cfs,
+            npv=npv,
+            irr=irr,
+            payback_year=payback,
+            revenue_year1=revenue_y1,
+            ebitda_year1=ebitda_y1,
+        ),
+        details,
+    )

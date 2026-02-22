@@ -1,48 +1,39 @@
-# trento_chargers.py - flat layout helper for chargers dataset
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Optional
+
 import pandas as pd
-from typing import Optional, List, Dict
+
+from common import fetch_csv, read_local_csv, FetchResult
 
 
-def _col(df: pd.DataFrame, names: List[str]) -> Optional[str]:
-    cols = {str(c).lower(): c for c in df.columns}
-    for n in names:
-        if n.lower() in cols:
-            return cols[n.lower()]
-    for c in df.columns:
-        lc = str(c).lower()
-        for n in names:
-            if n.lower() in lc:
-                return c
-    return None
+DEFAULT_TRENTO_DATASET_PAGE = (
+    "https://www.comune.trento.it/Amministrazione/Documenti-e-dati/Dataset/"
+    "Colonnine-di-ricarica-per-auto-elettriche"
+)
 
 
-def summarize_trento_chargers(df: pd.DataFrame) -> Dict:
-    if df is None or df.empty:
-        return {"rows": 0}
+@dataclass
+class ChargersSummary:
+    n_points: int
+    n_locations: int
+    power_cols: list[str]
 
-    out: Dict = {"rows": int(len(df)), "columns": list(df.columns)}
-    power_col = _col(df, ["power", "potenza", "kw", "max_power_kw"])
-    operator_col = _col(df, ["operator", "gestore", "provider", "brand"])
-    status_col = _col(df, ["status", "stato", "available", "attiva"])
-    type_col = _col(df, ["type", "tipo", "connector", "presa", "ac_dc", "current_type"])
 
-    if power_col:
-        p = pd.to_numeric(df[power_col], errors="coerce")
-        out["power_kw"] = {
-            "min": float(p.min()) if p.notna().any() else None,
-            "median": float(p.median()) if p.notna().any() else None,
-            "max": float(p.max()) if p.notna().any() else None,
-        }
-    if operator_col:
-        out["top_operators"] = df[operator_col].astype(str).value_counts().head(10).to_dict()
-    if status_col:
-        out["status_counts"] = df[status_col].astype(str).value_counts().head(10).to_dict()
-    if type_col:
-        out["type_counts"] = df[type_col].astype(str).value_counts().head(10).to_dict()
+def summarize_chargers(df: pd.DataFrame) -> ChargersSummary:
+    cols = [c.lower() for c in df.columns]
+    # Find likely identifiers
+    loc_cols = [c for c in df.columns if c.lower() in {"indirizzo", "address", "via", "luogo", "location"}]
+    power_cols = [c for c in df.columns if "kw" in c.lower() or "potenza" in c.lower() or "power" in c.lower()]
+    n_points = len(df)
+    n_locations = df[loc_cols[0]].nunique() if loc_cols else n_points
+    return ChargersSummary(n_points=n_points, n_locations=int(n_locations), power_cols=power_cols)
 
-    lat_col = _col(df, ["lat", "latitude", "y"])
-    lon_col = _col(df, ["lon", "lng", "longitude", "x"])
-    out["has_coordinates"] = bool(lat_col and lon_col)
-    return out
+
+def load_chargers_from_url(url: str) -> FetchResult:
+    return fetch_csv(url)
+
+
+def load_chargers_from_path(path: str) -> FetchResult:
+    return read_local_csv(path)

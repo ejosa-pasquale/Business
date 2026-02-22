@@ -1,53 +1,70 @@
-# sizing.py - flat layout sizing helpers
 from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Tuple
 
 import math
 
 
-def compute_capacity_kwh_per_year(power_kw: float, uptime: float, utilization: float) -> float:
-    power_kw = max(0.0, float(power_kw))
-    uptime = min(max(0.0, float(uptime)), 1.0)
-    utilization = min(max(0.0, float(utilization)), 1.0)
-    return power_kw * 8760.0 * uptime * utilization
+@dataclass
+class ChargerTech:
+    name: str
+    power_kw: float
+    connectors: int
 
 
-def suggest_mix_from_targets(
-    demand_kwh_year: float,
-    share_dc: float,
-    ac_power_kw: float,
-    dc_power_kw: float,
-    uptime: float,
-    target_util: float,
-    site_power_kw: float,
-) -> dict:
-    demand_kwh_year = max(0.0, float(demand_kwh_year))
-    share_dc = min(max(0.0, float(share_dc)), 1.0)
+@dataclass
+class SizingInputs:
+    demand_kwh_per_day: float
+    demand_sessions_per_day: float
+    uptime: float
+    target_utilization: float  # average utilization over the day (0-1)
+    avg_session_hours: float
 
-    ac_kwh_need = demand_kwh_year * (1.0 - share_dc)
-    dc_kwh_need = demand_kwh_year * share_dc
 
-    cap_ac_one = compute_capacity_kwh_per_year(ac_power_kw, uptime, target_util)
-    cap_dc_one = compute_capacity_kwh_per_year(dc_power_kw, uptime, target_util)
+@dataclass
+class SizingResult:
+    required_connectors: int
+    required_chargers: int
+    achieved_utilization: float
+    capacity_kwh_per_day: float
+    sessions_capacity_per_day: float
 
-    n_ac = int(math.ceil(ac_kwh_need / cap_ac_one)) if cap_ac_one > 0 else 0
-    n_dc = int(math.ceil(dc_kwh_need / cap_dc_one)) if cap_dc_one > 0 else 0
 
-    # Power constraint (simple peak assumption: all simultaneous at nameplate)
-    power_required = n_ac * float(ac_power_kw) + n_dc * float(dc_power_kw)
-    if power_required > float(site_power_kw) and float(site_power_kw) > 0:
-        # try reduce DC first, then AC (heuristic)
-        while n_dc > 0 and (n_ac * ac_power_kw + n_dc * dc_power_kw) > site_power_kw:
-            n_dc -= 1
-        while n_ac > 0 and (n_ac * ac_power_kw + n_dc * dc_power_kw) > site_power_kw:
-            n_ac -= 1
+def size_for_tech(tech: ChargerTech, inp: SizingInputs) -> SizingResult:
+    """Size number of chargers for a single technology.
 
-    power_required = n_ac * float(ac_power_kw) + n_dc * float(dc_power_kw)
+    Uses two constraints:
+      - energy: kWh/day capacity
+      - throughput: sessions/day capacity based on avg session duration
 
-    return {
-        "n_ac": n_ac,
-        "n_dc": n_dc,
-        "power_required_kw": power_required,
-        "ac_kwh_need": ac_kwh_need,
-        "dc_kwh_need": dc_kwh_need,
-        "site_power_kw": float(site_power_kw),
-    }
+    We pick the max required.
+    """
+    # Energy capacity per connector
+    cap_kwh_per_day_per_connector = tech.power_kw * 24.0 * inp.uptime * inp.target_utilization
+
+    # Sessions capacity per connector
+    sessions_cap_per_day_per_connector = (24.0 * inp.uptime * inp.target_utilization) / max(inp.avg_session_hours, 0.1)
+
+    req_by_energy = inp.demand_kwh_per_day / max(cap_kwh_per_day_per_connector, 1e-9)
+    req_by_sessions = inp.demand_sessions_per_day / max(sessions_cap_per_day_per_connector, 1e-9)
+
+    required_connectors = int(math.ceil(max(req_by_energy, req_by_sessions)))
+    required_chargers = int(math.ceil(required_connectors / tech.connectors))
+
+    # Achieved utilization given resulting count
+    total_connectors = required_chargers * tech.connectors
+    capacity_kwh_per_day = total_connectors * tech.power_kw * 24.0 * inp.uptime * inp.target_utilization
+    sessions_capacity = total_connectors * sessions_cap_per_day_per_connector
+
+    # utilization needed to meet energy (approx)
+    needed_util = inp.demand_kwh_per_day / max(total_connectors * tech.power_kw * 24.0 * inp.uptime, 1e-9)
+    achieved_util = float(min(max(needed_util, 0.0), 1.0))
+
+    return SizingResult(
+        required_connectors=required_connectors,
+        required_chargers=required_chargers,
+        achieved_utilization=achieved_util,
+        capacity_kwh_per_day=float(capacity_kwh_per_day),
+        sessions_capacity_per_day=float(sessions_capacity),
+    )

@@ -1,296 +1,581 @@
-# app.py - Trento EV Charging Investment Tool (FLAT, Streamlit Cloud)
 from __future__ import annotations
 
+import os
 import sys
+
+ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+if ROOT_DIR not in sys.path:
+    sys.path.insert(0, ROOT_DIR)
+
+import io
+from dataclasses import asdict
+
+import numpy as np
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 
-from common import fetch_csv, parse_parking_csv, format_eur, format_pct
-from trento_chargers import summarize_trento_chargers
-from parking_occupancy import estimate_daily_traffic_from_parking
-from demand import demand_from_parking_model, demand_from_funnel_model
-from sizing import suggest_mix_from_targets, compute_capacity_kwh_per_year
-from finance import build_cashflows, npv, irr, payback_year
-from optimizer import optimize_mix_bruteforce
+from common import fetch_csv
+from parking_occupancy import parse_parking_csv, estimate_daily_arrivals
+from trento_chargers import summarize_chargers, DEFAULT_TRENTO_DATASET_PAGE
+from demand import DemandInputs, demand_from_parking, FunnelInputs, demand_from_funnel
+from sizing import ChargerTech, SizingInputs, size_for_tech
+from finance import FinanceInputs, evaluate_finance
+from optimizer import TechCost, OptimizationInputs, optimize_mix
+from formatting import eur, pct, num
 
-st.set_page_config(page_title="Trento EV Charging Investment Tool", page_icon="⚡", layout="wide")
 
-st.sidebar.title("⚡ Trento EV Tool")
-st.sidebar.caption("Sizing + ROI + Strategy (AC 22 kW / DC 120 kW)")
-st.sidebar.caption(f"Python: {sys.version.split()[0]}")
+st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
-mode = st.sidebar.radio("Modalità domanda", ["Data-driven (CSV parcheggio)", "Funnel (stima macro)"], index=0)
+st.markdown(
+    """
+<style>
+    .stApp { background-color: #F8FAFC; color: #0F172A; }
+    .hero {
+        background: linear-gradient(90deg, #0F172A 0%, #0EA5E9 55%, #22C55E 100%);
+        padding: 1.4rem 1.6rem;
+        border-radius: 18px;
+        color: white;
+        margin-bottom: 1rem;
+    }
+    .hero h1 { margin: 0; font-size: 1.8rem; }
+    .hero p { margin: 0.2rem 0 0 0; opacity: 0.9; }
+    .card {
+        background: white;
+        border: 1px solid #E2E8F0;
+        border-radius: 14px;
+        padding: 1rem;
+        box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+    }
+    .muted { color: #475569; }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-st.sidebar.divider()
-st.sidebar.subheader("Orizzonte & Finanza")
-years = st.sidebar.slider("Orizzonte (anni)", 5, 15, 10, 1)
-discount_rate = st.sidebar.slider("WACC / tasso sconto (%)", 0.0, 20.0, 8.0, 0.5) / 100.0
+st.markdown(
+    """
+<div class="hero">
+  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
+</div>
+""",
+    unsafe_allow_html=True,
+)
 
-st.sidebar.divider()
-st.sidebar.subheader("Prezzi energia & vendita")
-sell_price_kwh = st.sidebar.number_input("Prezzo vendita (€/kWh)", min_value=0.0, value=0.62, step=0.01)
-energy_cost_kwh = st.sidebar.number_input("Costo energia (€/kWh)", min_value=0.0, value=0.26, step=0.01)
-roaming_fee_pct = st.sidebar.number_input("Fee roaming/payment (% ricavi)", min_value=0.0, value=6.0, step=0.5) / 100.0
+# -----------------------
+# Sidebar: scenario inputs
+# -----------------------
+with st.sidebar:
+    st.header("📍 Sito & Vincoli")
+    site_name = st.text_input("Nome parcheggio / sito", value="Parcheggio — Trento")
+    total_spots = st.number_input("Posti totali parcheggio", min_value=10, value=300, step=10)
+    avg_stay_hours = st.slider("Sosta media (ore)", min_value=0.5, max_value=12.0, value=3.0, step=0.5)
 
-st.sidebar.divider()
-st.sidebar.subheader("Affidabilità & target utilizzo")
-uptime = st.sidebar.slider("Uptime (%)", 80, 100, 97, 1) / 100.0
-target_util = st.sidebar.slider("Target utilizzo medio (%)", 10, 90, 35, 1) / 100.0
+    st.subheader("⚡ Vincoli tecnici")
+    power_available_kw = st.number_input("Potenza disponibile (kW)", min_value=10.0, value=250.0, step=10.0)
+    capex_budget = st.number_input("Budget CAPEX max (€)", min_value=5_000.0, value=250_000.0, step=10_000.0)
 
-st.sidebar.divider()
-st.sidebar.subheader("Vincoli sito")
-site_power_kw = st.sidebar.number_input("Potenza disponibile sito (kW)", min_value=1.0, value=200.0, step=10.0)
-capex_budget = st.sidebar.number_input("CAPEX massimo (opzionale, €)", min_value=0.0, value=0.0, step=1000.0)
+    st.subheader("🧠 Modalità domanda")
+    demand_mode = st.radio(
+        "Come stimare la domanda?",
+        ["Ho dati storici del parcheggio (consigliato)", "Non li ho: uso funnel BEV"],
+        index=0,
+    )
 
-st.title("⚡ Tool investimento colonnine EV - Trento")
-st.caption("Valuta ROI/NPV/IRR, CAPEX/OPEX e strategia (AC 22kW, DC 120kW).")
+    st.subheader("🔌 Parametri EV")
+    bev_share = st.slider("Quota BEV sul traffico (%)", 0.0, 40.0, 7.0, step=0.5) / 100.0
+    share_bev_that_charge = st.slider("Quota BEV che ricarica nel sito (%)", 0.0, 60.0, 18.0, step=1.0) / 100.0
 
-tabs = st.tabs(["1) Dati", "2) Domanda", "3) Sizing & Mix", "4) Business Case", "5) Ottimizzatore"])
+    st.subheader("⏱️ Durata sessione")
+    avg_session_hours_ac = st.slider("Durata media sessione AC (h)", 0.5, 10.0, 2.5, step=0.5)
+    avg_session_hours_dc = st.slider("Durata media sessione DC (h)", 0.1, 2.0, 0.45, step=0.05)
 
-with tabs[0]:
-    st.subheader("Dati pubblici / input")
+    st.subheader("🔀 Mix domanda AC/DC")
+    share_sessions_dc = st.slider("% sessioni su DC", 0, 100, 35, step=5) / 100.0
+    kwh_per_session_ac = st.number_input("kWh medi per sessione AC", min_value=2.0, value=18.0, step=1.0)
+    kwh_per_session_dc = st.number_input("kWh medi per sessione DC", min_value=5.0, value=32.0, step=1.0)
+
+    st.subheader("🛠️ Affidabilità & saturazione")
+    uptime = st.slider("Uptime tecnico (%)", 85, 100, 97) / 100.0
+    target_util = st.slider("Target utilizzo medio (anti-coda) (%)", 10, 90, 40) / 100.0
+
+    st.subheader("💶 Prezzi & costi")
+    sell_price = st.number_input("Prezzo vendita (€/kWh)", min_value=0.20, value=0.65, step=0.01, format="%.2f")
+    buy_price = st.number_input("Costo energia (€/kWh)", min_value=0.05, value=0.28, step=0.01, format="%.2f")
+    variable_fee = st.number_input("OPEX variabile extra (€/kWh) — roaming/acquiring", min_value=0.0, value=0.03, step=0.01, format="%.2f")
+
+    st.subheader("📈 Orizzonte investimento")
+    years = st.slider("Anni analisi", 5, 15, 10)
+    discount_rate = st.slider("WACC / tasso sconto (%)", 2.0, 15.0, 8.0, step=0.5) / 100.0
+    kwh_growth = st.slider("Crescita kWh YoY (%)", 0.0, 30.0, 10.0, step=1.0) / 100.0
+
+    st.subheader("🏗️ Costi unitari (editabili)")
+    with st.expander("AC 22 kW (per colonnina)", expanded=True):
+        ac_power = st.number_input("Potenza nominale AC (kW)", min_value=3.0, value=22.0, step=1.0)
+        ac_connectors = st.number_input("Connettori per colonnina AC", min_value=1, value=2, step=1)
+        ac_hw = st.number_input("Hardware AC (€)", min_value=500.0, value=2_000.0, step=100.0)
+        ac_install = st.number_input("Installazione + opere AC (€)", min_value=500.0, value=2_500.0, step=100.0)
+        ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=120.0, step=10.0)
+        ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=180.0, step=10.0)
+
+    with st.expander("DC fino 120 kW (per colonnina)", expanded=True):
+        dc_power = st.number_input("Potenza nominale DC (kW)", min_value=20.0, value=120.0, step=10.0)
+        dc_connectors = st.number_input("Connettori per colonnina DC", min_value=1, value=2, step=1)
+        dc_hw = st.number_input("Hardware DC (€)", min_value=5_000.0, value=45_000.0, step=1_000.0)
+        dc_install = st.number_input("Installazione + opere DC (€)", min_value=2_000.0, value=18_000.0, step=1_000.0)
+        dc_mnt = st.number_input("Manutenzione annua DC (€/a)", min_value=0.0, value=1_200.0, step=50.0)
+        dc_backend = st.number_input("Backend/CSMS annuo per colonnina DC (€/a)", min_value=0.0, value=420.0, step=20.0)
+
+    st.subheader("🧱 CAPEX extra sito")
+    grid_connection_capex = st.number_input(
+        "Connessione rete / upgrade / scavi (CAPEX extra)",
+        min_value=0.0,
+        value=30_000.0,
+        step=5_000.0,
+        help="Inserisci una stima unica (MVP). In v1 puoi passare a range + Monte Carlo.",
+    )
+    signage_capex = st.number_input("Segnaletica + stalli dedicati (CAPEX)", min_value=0.0, value=6_000.0, step=500.0)
+
+    st.subheader("🧾 OPEX fissi di sito")
+    overhead_opex = st.number_input(
+        "Overhead annuo (assicurazioni, pulizia, call center, affitto/royalty)",
+        min_value=0.0,
+        value=9_000.0,
+        step=500.0,
+    )
+    overhead_growth = st.slider("Crescita OPEX fissi YoY (%)", 0.0, 10.0, 2.0, step=0.5) / 100.0
+
+    st.subheader("🔎 Ricerca combinazioni")
+    max_ac = st.slider("Max colonnine AC da testare", 0, 60, 30)
+    max_dc = st.slider("Max colonnine DC da testare", 0, 20, 10)
+
+
+# -----------------------
+# Demand estimation
+# -----------------------
+vehicles_per_day_est = None
+parking_series_df = None
+
+if demand_mode.startswith("Ho dati"):
+    st.markdown("### 1) Domanda — da dati storici del parcheggio")
+    c1, c2 = st.columns([1.3, 1])
+
+    with c1:
+        st.markdown("**Carica un CSV con serie temporale** (timestamp + occupazione oppure posti liberi).")
+        up = st.file_uploader("CSV parcheggio", type=["csv", "tsv"])
+        sample = st.checkbox("Usa un esempio fittizio (sample_data)", value=(up is None))
+
+        if up is not None:
+            raw = up.read()
+            df_raw = pd.read_csv(io.BytesIO(raw))
+        else:
+            df_raw = None
+            if sample:
+                df_raw = pd.read_csv("sample_data/parking_sample.csv")
+
+        if df_raw is not None:
+            try:
+                series = parse_parking_csv(df_raw)
+                arrivals = estimate_daily_arrivals(series, total_spots=int(total_spots), avg_stay_hours=float(avg_stay_hours))
+                vehicles_per_day_est = float(arrivals["vehicles_per_day"].mean())
+                parking_series_df = series.df
+
+                st.success(f"Serie caricata. Veicoli stimati/giorno (media): {num(vehicles_per_day_est, 0)}")
+
+                fig = px.line(series.df, x="ts", y="value", title="Serie storica parcheggio (metrica grezza)")
+                st.plotly_chart(fig, use_container_width=True)
+
+                fig2 = px.bar(arrivals, x="date", y="vehicles_per_day", title="Stima veicoli/giorno")
+                st.plotly_chart(fig2, use_container_width=True)
+
+            except Exception as e:
+                st.error(f"Errore parsing CSV: {e}")
+
+    with c2:
+        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Lo stimatore veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
+        vehicles_override = st.number_input(
+            "Override veicoli/giorno (se conosci il dato)",
+            min_value=0.0,
+            value=float(vehicles_per_day_est) if vehicles_per_day_est is not None else 900.0,
+            step=50.0,
+        )
+        vehicles_per_day_est = float(vehicles_override)
+
+    # Compute demand
+    dinp = DemandInputs(
+        vehicles_per_day=float(vehicles_per_day_est),
+        bev_share=float(bev_share),
+        share_bev_that_charge=float(share_bev_that_charge),
+        kwh_per_session_ac=float(kwh_per_session_ac),
+        kwh_per_session_dc=float(kwh_per_session_dc),
+        share_sessions_dc=float(share_sessions_dc),
+    )
+    dres = demand_from_parking(dinp)
+    demand_kwh_year1 = dres.kwh_per_day * 365.0
+
+else:
+    st.markdown("### 1) Domanda — funnel BEV (senza dati parcheggio)")
+    f1, f2 = st.columns([1.1, 0.9])
+
+    with f1:
+        st.markdown("Inserisci un funnel semplice: BEV → kWh annui → quota pubblico → quota cattura sito.")
+        bev_2030 = st.number_input("BEV (Provincia di Trento) target anno base", min_value=0, value=30_000, step=1_000)
+        kwh_per_bev_year = st.number_input("Consumo medio annuo per BEV (kWh/anno)", min_value=500.0, value=3_000.0, step=100.0)
+        public_share = st.slider("Quota ricarica pubblica (%)", 0, 100, 30, step=5) / 100.0
+        capture_share = st.slider("Quota cattura sito (%)", 0.1, 20.0, 4.0, step=0.5) / 100.0
+
+        finp = FunnelInputs(
+            bev_2030=int(bev_2030),
+            kwh_per_bev_year=float(kwh_per_bev_year),
+            public_share=float(public_share),
+            capture_share=float(capture_share),
+        )
+        demand_kwh_year1 = demand_from_funnel(finp)
+
+    with f2:
+        st.markdown("<div class='card'><b>Tip</b><br><span class='muted'>Per rendere il funnel più credibile, usa anche i dataset pubblici sulle colonnine a Trento per stimare competizione e gap di copertura.</span></div>", unsafe_allow_html=True)
+        st.caption("Dataset Comune di Trento (pagina):")
+        st.code(DEFAULT_TRENTO_DATASET_PAGE)
+
+    # convert annual kWh to daily + sessions via assumptions
+    # Derive sessions from blended kWh/session
+    blended_kwh_per_session = (1 - share_sessions_dc) * kwh_per_session_ac + share_sessions_dc * kwh_per_session_dc
+    sessions_per_day = (demand_kwh_year1 / 365.0) / max(blended_kwh_per_session, 1e-6)
+    dres = None
+    class _Tmp: pass
+    dres = _Tmp()
+    dres.kwh_per_day = demand_kwh_year1 / 365.0
+    dres.sessions_per_day = sessions_per_day
+    dres.sessions_ac_per_day = sessions_per_day * (1 - share_sessions_dc)
+    dres.sessions_dc_per_day = sessions_per_day * share_sessions_dc
+    dres.kwh_ac_per_day = dres.sessions_ac_per_day * kwh_per_session_ac
+    dres.kwh_dc_per_day = dres.sessions_dc_per_day * kwh_per_session_dc
+
+
+st.divider()
+
+# -----------------------
+# Tabs: Sizing, Finance, Strategy, Data
+# -----------------------
+
+sizing_tab, finance_tab, strategy_tab, data_tab = st.tabs(["📐 Sizing", "💼 Business Case", "🧭 Strategia", "🗂️ Dati pubblici"])
+
+with sizing_tab:
+    st.markdown("### 2) Sizing — quante colonnine servono?")
+
+    cA, cB = st.columns(2)
+
+    # AC sizing
+    with cA:
+        st.markdown("#### AC 22 kW")
+        tech_ac = ChargerTech(name="AC", power_kw=float(ac_power), connectors=int(ac_connectors))
+        s_inp_ac = SizingInputs(
+            demand_kwh_per_day=float(dres.kwh_ac_per_day),
+            demand_sessions_per_day=float(dres.sessions_ac_per_day),
+            uptime=float(uptime),
+            target_utilization=float(target_util),
+            avg_session_hours=float(avg_session_hours_ac),
+        )
+        sres_ac = size_for_tech(tech_ac, s_inp_ac)
+
+        st.metric("Connettori richiesti", sres_ac.required_connectors)
+        st.metric("Colonnine richieste", sres_ac.required_chargers)
+        st.metric("Utilizzo richiesto (energy-based)", pct(sres_ac.achieved_utilization))
+
+    with cB:
+        st.markdown("#### DC fino 120 kW")
+        tech_dc = ChargerTech(name="DC", power_kw=float(dc_power), connectors=int(dc_connectors))
+        s_inp_dc = SizingInputs(
+            demand_kwh_per_day=float(dres.kwh_dc_per_day),
+            demand_sessions_per_day=float(dres.sessions_dc_per_day),
+            uptime=float(uptime),
+            target_utilization=float(target_util),
+            avg_session_hours=float(avg_session_hours_dc),
+        )
+        sres_dc = size_for_tech(tech_dc, s_inp_dc)
+
+        st.metric("Connettori richiesti", sres_dc.required_connectors)
+        st.metric("Colonnine richieste", sres_dc.required_chargers)
+        st.metric("Utilizzo richiesto (energy-based)", pct(sres_dc.achieved_utilization))
+
+    st.markdown("#### Sintesi domanda")
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("kWh anno (Year 1)", num(demand_kwh_year1, 0))
+    k2.metric("kWh/giorno", num(dres.kwh_per_day, 1))
+    k3.metric("Sessioni/giorno", num(dres.sessions_per_day, 1))
+    k4.metric("Mix DC sessioni", pct(share_sessions_dc))
+
+    # Power feasibility check
+    installed_power_req = sres_ac.required_chargers * ac_power + sres_dc.required_chargers * dc_power
+    st.info(
+        f"Potenza installata (sizing minimo): {num(installed_power_req,0)} kW vs Potenza disponibile: {num(power_available_kw,0)} kW"
+    )
+
+
+with finance_tab:
+    st.markdown("### 3) Business Case — CAPEX/OPEX/ROI")
+
+    # Default configuration: use sizing results, but allow overrides
+    left, right = st.columns([1, 1])
+    with left:
+        st.markdown("#### Configurazione")
+        n_ac = st.number_input("Colonnine AC", min_value=0, value=int(sres_ac.required_chargers), step=1)
+        n_dc = st.number_input("Colonnine DC", min_value=0, value=int(sres_dc.required_chargers), step=1)
+
+        capex = (
+            n_ac * (ac_hw + ac_install)
+            + n_dc * (dc_hw + dc_install)
+            + grid_connection_capex
+            + signage_capex
+        )
+        fixed_opex_year1 = (
+            overhead_opex
+            + n_ac * (ac_mnt + ac_backend)
+            + n_dc * (dc_mnt + dc_backend)
+        )
+
+        st.metric("CAPEX totale", eur(capex))
+        st.metric("OPEX fisso anno 1", eur(fixed_opex_year1))
+        st.metric("Potenza installata", f"{num(n_ac*ac_power + n_dc*dc_power, 0)} kW")
+
+        if capex > capex_budget:
+            st.warning("CAPEX sopra il budget impostato in sidebar.")
+        if (n_ac*ac_power + n_dc*dc_power) > power_available_kw:
+            st.warning("Potenza installata sopra la potenza disponibile.")
+
+    with right:
+        st.markdown("#### Risultati finanziari")
+
+        fin_inp = FinanceInputs(
+            years=int(years),
+            discount_rate=float(discount_rate),
+            capex_total=float(capex),
+            price_sell_eur_per_kwh=float(sell_price),
+            price_buy_eur_per_kwh=float(buy_price),
+            kwh_sold_year1=float(demand_kwh_year1),
+            kwh_growth_yoy=float(kwh_growth),
+            fixed_opex_year1=float(fixed_opex_year1),
+            fixed_opex_growth_yoy=float(overhead_growth),
+            variable_opex_per_kwh=float(variable_fee),
+        )
+
+        fin_res, fin_details = evaluate_finance(fin_inp)
+
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("NPV", eur(fin_res.npv))
+        m2.metric("IRR", pct(fin_res.irr) if np.isfinite(fin_res.irr) else "n/a")
+        m3.metric("Payback (anni, scontato)", "∞" if not np.isfinite(fin_res.payback_year) else num(fin_res.payback_year, 1))
+        m4.metric("EBITDA anno 1", eur(fin_res.ebitda_year1))
+
+        df_cf = pd.DataFrame({
+            "year": list(range(0, years + 1)),
+            "cashflow": fin_res.cashflows,
+        })
+        fig_cf = px.bar(df_cf, x="year", y="cashflow", title="Cashflow (Year 0 = CAPEX)")
+        st.plotly_chart(fig_cf, use_container_width=True)
+
+        df_pnl = pd.DataFrame({
+            "year": list(range(1, years + 1)),
+            "kwh": fin_details["kwh"],
+            "revenue": fin_details["revenue"],
+            "energy_cost": fin_details["energy_cost"],
+            "fixed_opex": fin_details["fixed_opex"],
+            "var_cost": fin_details["var_cost"],
+            "ebitda": fin_details["ebitda"],
+        })
+        fig_ebitda = px.line(df_pnl, x="year", y="ebitda", title="EBITDA per anno")
+        st.plotly_chart(fig_ebitda, use_container_width=True)
+
+        with st.expander("Scarica P&L (CSV)"):
+            st.download_button(
+                "Download CSV",
+                data=df_pnl.to_csv(index=False).encode("utf-8"),
+                file_name="pnl_trento_ev.csv",
+                mime="text/csv",
+            )
+
+
+with strategy_tab:
+    st.markdown("### 4) Strategia — mix AC/DC ottimale (vincoli potenza & budget)")
+
+    st.markdown(
+        """
+- **AC 22 kW** tende a massimizzare copertura per sosta lunga (costo basso, più stalli).
+- **DC 120 kW** massimizza throughput e visibilità (sosta breve, alta rotazione), ma pesa su potenza e CAPEX.
+
+Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e scegliamo quella con **NPV massimo**.
+"""
+    )
+
+    ac_cost = TechCost(
+        capex_per_charger=float(ac_hw + ac_install),
+        fixed_opex_per_charger_year=float(ac_mnt + ac_backend),
+        connectors=int(ac_connectors),
+        power_kw=float(ac_power),
+    )
+    dc_cost = TechCost(
+        capex_per_charger=float(dc_hw + dc_install),
+        fixed_opex_per_charger_year=float(dc_mnt + dc_backend),
+        connectors=int(dc_connectors),
+        power_kw=float(dc_power),
+    )
+
+    # Demand split year 1
+    kwh_ac_year1 = float(dres.kwh_ac_per_day * 365.0)
+    kwh_dc_year1 = float(dres.kwh_dc_per_day * 365.0)
+
+    opt_inp = OptimizationInputs(
+        kwh_ac_year1=kwh_ac_year1,
+        kwh_dc_year1=kwh_dc_year1,
+        power_available_kw=float(power_available_kw),
+        capex_budget=float(capex_budget - grid_connection_capex - signage_capex),
+        years=int(years),
+        discount_rate=float(discount_rate),
+        price_sell_eur_per_kwh=float(sell_price),
+        price_buy_eur_per_kwh=float(buy_price),
+        kwh_growth_yoy=float(kwh_growth),
+        variable_opex_per_kwh=float(variable_fee),
+        fixed_opex_overhead_year1=float(overhead_opex),
+        fixed_opex_overhead_growth_yoy=float(overhead_growth),
+        max_ac=int(max_ac),
+        max_dc=int(max_dc),
+    )
+
+    best, allres = optimize_mix(opt_inp, ac=ac_cost, dc=dc_cost)
+
+    st.markdown("#### Raccomandazione")
+    rec1, rec2, rec3, rec4 = st.columns(4)
+    rec1.metric("AC consigliate", best.n_ac)
+    rec2.metric("DC consigliate", best.n_dc)
+    rec3.metric("NPV", eur(best.npv))
+    rec4.metric("CAPEX (solo hardware+install)", eur(best.capex))
+
+    st.info(
+        f"Potenza installata (hardware): {num(best.power_installed_kw,0)} kW | "
+        f"CAPEX extra sito: {eur(grid_connection_capex + signage_capex)} | "
+        f"Note: {best.notes or '—'}"
+    )
+
+    # Show top 20
+    top = pd.DataFrame([asdict(x) for x in allres[:20]])
+    if len(top) > 0:
+        top["capex_total"] = top["capex"] + grid_connection_capex + signage_capex
+        st.dataframe(top[["n_ac","n_dc","npv","irr","payback","capex_total","power_installed_kw","notes"]], use_container_width=True)
+
+        fig = px.scatter(
+            top,
+            x="capex",
+            y="npv",
+            size="power_installed_kw",
+            hover_data=["n_ac","n_dc","payback","irr","notes"],
+            title="Frontiera (Top 20): NPV vs CAPEX (hardware+install)",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    st.markdown("#### Roadmap (regole pratiche)")
+    st.markdown(
+        """
+- **Fase 1 (0–12 mesi)**: installa il mix consigliato ma con priorità a **AC** se la sosta è lunga (≥2–3h).
+- **Trigger DC**: aggiungi DC se **utilizzo DC** supera ~20–25% medio (o code/saturazione oltre target).
+- **Vincolo rete**: se la potenza è limitata, abilita **load management** e pianifica upgrade (MT/BT) a step.
+"""
+    )
+
+
+with data_tab:
+    st.markdown("### 5) Dati pubblici — competizione & contesto")
+
+    st.markdown(
+        """
+Questa sezione serve a:
+- vedere quante colonnine esistono già a Trento (competizione, coverage)
+- importare CSV pubblici (quando hai l'URL diretto al file)
+
+**Nota:** la pagina dataset del Comune di Trento è un landing; spesso il link al CSV è all'interno della pagina.
+Puoi incollare qui l'URL *diretto* al CSV oppure caricare il file.
+"""
+    )
+
     c1, c2 = st.columns(2)
 
     with c1:
-        st.markdown("### Colonnine esistenti (upload CSV o URL)")
-        chargers_file = st.file_uploader("Upload CSV colonnine (opzionale)", type=["csv"], key="chargers_file")
-        chargers_url = st.text_input("URL CSV colonnine (opzionale)", value="", key="chargers_url")
+        st.markdown("#### Colonnine esistenti (Comune di Trento)")
+        url = st.text_input("URL diretto CSV (opzionale)", value="")
+        up = st.file_uploader("Oppure carica CSV colonnine", type=["csv","tsv"], key="chargers")
 
-        chargers_df = None
-        if chargers_file is not None:
-            chargers_df = pd.read_csv(chargers_file)
-        elif chargers_url.strip():
-            chargers_df = fetch_csv(chargers_url.strip())
+        df_ch = None
+        meta = ""
+        if up is not None:
+            df_ch = pd.read_csv(up)
+            meta = "upload"
+        elif url.strip():
+            try:
+                fr = fetch_csv(url.strip())
+                df_ch = fr.df
+                meta = fr.note
+            except Exception as e:
+                st.error(f"Fetch fallito: {e}")
 
-        if chargers_df is not None and not chargers_df.empty:
-            st.success("CSV colonnine caricato.")
-            st.dataframe(chargers_df.head(20), use_container_width=True)
-            st.markdown("**Sintesi**")
-            st.json(summarize_trento_chargers(chargers_df))
+        if df_ch is None:
+            st.info("Nessun file caricato. Puoi usare la pagina dataset come riferimento:")
+            st.code(DEFAULT_TRENTO_DATASET_PAGE)
+        else:
+            summ = summarize_chargers(df_ch)
+            st.success(f"Caricate {summ.n_points} righe | locations stimate: {summ.n_locations} | meta: {meta}")
+            st.dataframe(df_ch.head(50), use_container_width=True)
 
     with c2:
-        st.markdown("### Dati parcheggio (CSV) - data-driven")
-        parking_file = st.file_uploader("Upload CSV parcheggio (opzionale)", type=["csv"], key="parking_file")
-        parking_df = None
-        if parking_file is not None:
-            raw = pd.read_csv(parking_file)
-            parking_df = parse_parking_csv(raw)
-            st.success("CSV parcheggio caricato e normalizzato.")
-            st.dataframe(parking_df.head(30), use_container_width=True)
-
-    st.session_state["parking_df"] = parking_df
-
-with tabs[1]:
-    st.subheader("Domanda stimata (kWh/anno)")
-    if mode == "Data-driven (CSV parcheggio)":
-        if st.session_state.get("parking_df") is None:
-            st.info("Carica un CSV parcheggio nel tab **1) Dati**.")
-        else:
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                total_stalls = st.number_input("Posti totali parcheggio", min_value=1, value=400, step=10)
-                avg_dwell_h = st.number_input("Durata media sosta (h)", min_value=0.25, value=2.0, step=0.25)
-            with c2:
-                bev_share = st.number_input("% BEV sul traffico", min_value=0.0, value=6.0, step=0.5) / 100.0
-                charge_take_rate = st.number_input("% BEV che ricaricano in sito", min_value=0.0, value=18.0, step=1.0) / 100.0
-            with c3:
-                kwh_per_session_ac = st.number_input("kWh per sessione AC (media)", min_value=1.0, value=12.0, step=1.0)
-                kwh_per_session_dc = st.number_input("kWh per sessione DC (media)", min_value=1.0, value=22.0, step=1.0)
-
-            daily_traffic = estimate_daily_traffic_from_parking(st.session_state["parking_df"], total_stalls, avg_dwell_h)
-            demand = demand_from_parking_model(
-                daily_traffic=daily_traffic,
-                bev_share=bev_share,
-                charge_take_rate=charge_take_rate,
-                kwh_per_session_ac=kwh_per_session_ac,
-                kwh_per_session_dc=kwh_per_session_dc,
-                share_dc=0.25,
-                days_per_year=365,
-            )
-            st.metric("Traffico stimato (veicoli/giorno)", f"{daily_traffic:,.0f}".replace(",", "."))
-            st.metric("Domanda annua (kWh/anno)", f"{demand['kwh_year']:,.0f}".replace(",", "."))
-            st.session_state["demand_kwh_year"] = float(demand["kwh_year"])
-            st.json(demand)
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            bev_count = st.number_input("BEV area di riferimento (n.)", min_value=0, value=3500, step=100)
-        with c2:
-            kwh_per_bev_year = st.number_input("kWh/BEV/anno (totali)", min_value=0.0, value=2200.0, step=50.0)
-            public_share = st.number_input("% ricarica pubblica", min_value=0.0, value=35.0, step=1.0) / 100.0
-        with c3:
-            capture = st.number_input("% quota catturata dal sito", min_value=0.0, value=2.0, step=0.1) / 100.0
-
-        demand = demand_from_funnel_model(bev_count, kwh_per_bev_year, public_share, capture)
-        st.metric("Domanda annua (kWh/anno)", f"{demand['kwh_year']:,.0f}".replace(",", "."))
-        st.session_state["demand_kwh_year"] = float(demand["kwh_year"])
-        st.json(demand)
-
-    st.session_state.setdefault("demand_kwh_year", 0.0)
-
-with tabs[2]:
-    st.subheader("Sizing & Mix AC/DC")
-    demand_kwh_year = float(st.session_state.get("demand_kwh_year", 0.0) or 0.0)
-    if demand_kwh_year <= 0:
-        st.info("Prima stima la domanda nel tab **2) Domanda**.")
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            ac_power_kw = st.number_input("Potenza AC per punto (kW)", min_value=1.0, value=22.0, step=1.0)
-            ac_capex = st.number_input("CAPEX per punto AC (€)", min_value=0.0, value=6500.0, step=500.0)
-            ac_opex_year = st.number_input("OPEX annuo per punto AC (€)", min_value=0.0, value=450.0, step=50.0)
-        with c2:
-            dc_power_kw = st.number_input("Potenza DC per punto (kW)", min_value=10.0, value=120.0, step=10.0)
-            dc_capex = st.number_input("CAPEX per punto DC (€)", min_value=0.0, value=65000.0, step=1000.0)
-            dc_opex_year = st.number_input("OPEX annuo per punto DC (€)", min_value=0.0, value=2500.0, step=100.0)
-        with c3:
-            share_dc = st.slider("Quota domanda su DC (%)", 0, 80, 25, 1) / 100.0
-            st.write(f"Target utilizzo medio: **{format_pct(target_util)}**")
-            st.write(f"Uptime: **{format_pct(uptime)}**")
-
-        sizing = suggest_mix_from_targets(
-            demand_kwh_year=demand_kwh_year,
-            share_dc=share_dc,
-            ac_power_kw=ac_power_kw,
-            dc_power_kw=dc_power_kw,
-            uptime=uptime,
-            target_util=target_util,
-            site_power_kw=site_power_kw,
-        )
-
-        st.markdown("### Risultato sizing")
-        colA, colB, colC = st.columns(3)
-        colA.metric("Punti AC", f"{sizing['n_ac']}")
-        colB.metric("Punti DC", f"{sizing['n_dc']}")
-        colC.metric("Potenza richiesta (kW)", f"{sizing['power_required_kw']:.0f}")
-        st.json(sizing)
-
-        cap_ac = compute_capacity_kwh_per_year(ac_power_kw, uptime, target_util) * sizing["n_ac"]
-        cap_dc = compute_capacity_kwh_per_year(dc_power_kw, uptime, target_util) * sizing["n_dc"]
-        st.markdown("### Capacità annua a target utilizzo")
-        st.markdown(
-            f"""- AC: **{cap_ac:,.0f} kWh/anno**
-- DC: **{cap_dc:,.0f} kWh/anno**
-- Totale: **{(cap_ac + cap_dc):,.0f} kWh/anno**"""
-        )
-
-        st.session_state["config"] = {
-            "n_ac": sizing["n_ac"],
-            "n_dc": sizing["n_dc"],
-            "ac_power_kw": ac_power_kw,
-            "dc_power_kw": dc_power_kw,
-            "ac_capex": ac_capex,
-            "dc_capex": dc_capex,
-            "ac_opex_year": ac_opex_year,
-            "dc_opex_year": dc_opex_year,
-            "share_dc": share_dc,
+        st.markdown("#### Esporta scenario")
+        scenario = {
+            "site": site_name,
+            "total_spots": total_spots,
+            "avg_stay_hours": avg_stay_hours,
+            "power_available_kw": power_available_kw,
+            "capex_budget": capex_budget,
+            "bev_share": bev_share,
+            "share_bev_that_charge": share_bev_that_charge,
+            "share_sessions_dc": share_sessions_dc,
+            "kwh_per_session_ac": kwh_per_session_ac,
+            "kwh_per_session_dc": kwh_per_session_dc,
+            "uptime": uptime,
+            "target_util": target_util,
+            "sell_price": sell_price,
+            "buy_price": buy_price,
+            "variable_fee": variable_fee,
+            "years": years,
+            "discount_rate": discount_rate,
+            "kwh_growth": kwh_growth,
+            "ac": {
+                "power": ac_power,
+                "connectors": ac_connectors,
+                "hw": ac_hw,
+                "install": ac_install,
+                "mnt": ac_mnt,
+                "backend": ac_backend,
+            },
+            "dc": {
+                "power": dc_power,
+                "connectors": dc_connectors,
+                "hw": dc_hw,
+                "install": dc_install,
+                "mnt": dc_mnt,
+                "backend": dc_backend,
+            },
+            "capex_extra": {
+                "grid_connection": grid_connection_capex,
+                "signage": signage_capex,
+            },
+            "opex_overhead": {
+                "overhead": overhead_opex,
+                "growth": overhead_growth,
+            },
         }
-
-with tabs[3]:
-    st.subheader("Business Case (CAPEX/OPEX/ROI)")
-    demand_kwh_year = float(st.session_state.get("demand_kwh_year", 0.0) or 0.0)
-    cfg = st.session_state.get("config")
-
-    if demand_kwh_year <= 0 or not cfg:
-        st.info("Completa **2) Domanda** e **3) Sizing & Mix**.")
-    else:
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            fixed_capex = st.number_input("CAPEX fisso (opere civili/connessione) €", min_value=0.0, value=25000.0, step=1000.0)
-        with c2:
-            fixed_opex = st.number_input("OPEX fisso annuo (CSMS, connettività, assicurazione) €", min_value=0.0, value=6000.0, step=500.0)
-        with c3:
-            annual_growth_kwh = st.number_input("Crescita annua domanda (%)", min_value=-20.0, value=8.0, step=1.0) / 100.0
-
-        capex_total = cfg["n_ac"] * cfg["ac_capex"] + cfg["n_dc"] * cfg["dc_capex"] + fixed_capex
-
-        cash = build_cashflows(
-            years=years,
-            demand_kwh_year=demand_kwh_year,
-            annual_growth_kwh=annual_growth_kwh,
-            sell_price_kwh=sell_price_kwh,
-            energy_cost_kwh=energy_cost_kwh,
-            roaming_fee_pct=roaming_fee_pct,
-            n_ac=cfg["n_ac"],
-            n_dc=cfg["n_dc"],
-            opex_ac_year=cfg["ac_opex_year"],
-            opex_dc_year=cfg["dc_opex_year"],
-            fixed_opex_year=fixed_opex,
-            capex_total=capex_total,
+        st.download_button(
+            "Download scenario JSON",
+            data=pd.Series(scenario).to_json(),
+            file_name="scenario_trento_ev.json",
+            mime="application/json",
         )
 
-        npv_val = npv(cash["net_cashflow"], discount_rate)
-        irr_val = irr(cash["net_cashflow"])
-        pb = payback_year(cash["net_cashflow"])
-
-        k1, k2, k3, k4 = st.columns(4)
-        k1.metric("CAPEX totale", format_eur(capex_total))
-        k2.metric("NPV", format_eur(npv_val))
-        k3.metric("IRR", f"{(irr_val*100):.1f}%" if irr_val is not None else "n/a")
-        k4.metric("Payback", f"{pb:.1f} anni" if pb is not None else "n/a")
-
-        df = cash["table"]
-        st.dataframe(df, use_container_width=True)
-        st.download_button("Scarica cashflow CSV", data=df.to_csv(index=False).encode("utf-8"), file_name="cashflow.csv", mime="text/csv")
-
-with tabs[4]:
-    st.subheader("Ottimizzatore mix (NPV massimo)")
-    demand_kwh_year = float(st.session_state.get("demand_kwh_year", 0.0) or 0.0)
-    if demand_kwh_year <= 0:
-        st.info("Stima prima la domanda nel tab **2) Domanda**.")
-    else:
-        st.write("Cerca il miglior mix AC/DC con vincoli di potenza e (opzionalmente) budget.")
-        c1, c2, c3 = st.columns(3)
-        with c1:
-            ac_power_kw = st.number_input("AC kW", min_value=1.0, value=22.0, step=1.0, key="opt_ac_kw")
-            ac_capex = st.number_input("CAPEX AC (€)", min_value=0.0, value=6500.0, step=500.0, key="opt_ac_capex")
-            ac_opex = st.number_input("OPEX AC annuo (€)", min_value=0.0, value=450.0, step=50.0, key="opt_ac_opex")
-        with c2:
-            dc_power_kw = st.number_input("DC kW", min_value=10.0, value=120.0, step=10.0, key="opt_dc_kw")
-            dc_capex = st.number_input("CAPEX DC (€)", min_value=0.0, value=65000.0, step=1000.0, key="opt_dc_capex")
-            dc_opex = st.number_input("OPEX DC annuo (€)", min_value=0.0, value=2500.0, step=100.0, key="opt_dc_opex")
-        with c3:
-            fixed_capex = st.number_input("CAPEX fisso (€)", min_value=0.0, value=25000.0, step=1000.0, key="opt_fixed_capex")
-            fixed_opex = st.number_input("OPEX fisso annuo (€)", min_value=0.0, value=6000.0, step=500.0, key="opt_fixed_opex")
-            annual_growth_kwh = st.number_input("Crescita annua domanda (%)", min_value=-20.0, value=8.0, step=1.0, key="opt_growth") / 100.0
-
-        c4, c5, c6 = st.columns(3)
-        with c4:
-            max_ac = st.slider("Max punti AC", 0, 40, 16, 1)
-        with c5:
-            max_dc = st.slider("Max punti DC", 0, 10, 3, 1)
-        with c6:
-            share_dc = st.slider("Quota domanda su DC (%)", 0, 80, 25, 1) / 100.0
-
-        if st.button("Esegui ottimizzazione"):
-            res = optimize_mix_bruteforce(
-                years=years,
-                discount_rate=discount_rate,
-                demand_kwh_year=demand_kwh_year,
-                annual_growth_kwh=annual_growth_kwh,
-                sell_price_kwh=sell_price_kwh,
-                energy_cost_kwh=energy_cost_kwh,
-                roaming_fee_pct=roaming_fee_pct,
-                ac_power_kw=ac_power_kw,
-                dc_power_kw=dc_power_kw,
-                ac_capex=ac_capex,
-                dc_capex=dc_capex,
-                ac_opex_year=ac_opex,
-                dc_opex_year=dc_opex,
-                fixed_capex=fixed_capex,
-                fixed_opex_year=fixed_opex,
-                uptime=uptime,
-                target_util=target_util,
-                share_dc=share_dc,
-                site_power_kw=site_power_kw,
-                capex_budget=(capex_budget if capex_budget > 0 else None),
-                max_ac=max_ac,
-                max_dc=max_dc,
-            )
-            if res is None:
-                st.warning("Nessuna combinazione soddisfa i vincoli (potenza/budget) e la copertura domanda.")
-            else:
-                st.success("Miglior mix trovato.")
-                st.json(res["best"])
-                st.dataframe(res["top_table"], use_container_width=True)
-                st.download_button("Scarica top risultati CSV", data=res["top_table"].to_csv(index=False).encode("utf-8"), file_name="optimizer_top_results.csv", mime="text/csv")
+st.caption("MVP — costruito per essere esteso: Monte Carlo su CAPEX connessione rete, API parsing dataset Comune, tariffazione per kW impegnati, e ottimizzazione più realistica su code e profili orari.")
