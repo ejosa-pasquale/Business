@@ -576,7 +576,7 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_per_charger=float(dc30_hw + dc30_install),
         fixed_opex_per_charger_year=float(dc30_mnt + dc30_backend),
         connectors=int(dc30_connectors),
-        power_kw=float(dc30_power),,
+        power_kw=float(dc30_power),
         hours_per_day=float(hours_dc),
     )
     dc60_cost = TechCost(
@@ -584,7 +584,7 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_per_charger=float(dc60_hw + dc60_install),
         fixed_opex_per_charger_year=float(dc60_mnt + dc60_backend),
         connectors=int(dc60_connectors),
-        power_kw=float(dc60_power),,
+        power_kw=float(dc60_power),
         hours_per_day=float(hours_dc),
     )
     dc90_cost = TechCost(
@@ -592,7 +592,7 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_per_charger=float(dc90_hw + dc90_install),
         fixed_opex_per_charger_year=float(dc90_mnt + dc90_backend),
         connectors=int(dc90_connectors),
-        power_kw=float(dc90_power),,
+        power_kw=float(dc90_power),
         hours_per_day=float(hours_dc),
     )
 
