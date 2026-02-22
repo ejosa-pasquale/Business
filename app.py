@@ -21,7 +21,7 @@ from trento_chargers import summarize_chargers, DEFAULT_TRENTO_DATASET_PAGE
 from demand import DemandInputs, demand_from_parking, FunnelInputs, demand_from_funnel
 from sizing import ChargerTech, SizingInputs, size_for_tech
 from finance import FinanceInputs, evaluate_finance
-from optimizer import TechCost, OptimizationInputs, optimize_mix
+from optimizer_multi import TechCost, OptimizationInputs, optimize_mix_4tech
 from formatting import eur, pct, num
 
 
@@ -119,13 +119,31 @@ with st.sidebar:
         ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=120.0, step=10.0)
         ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=180.0, step=10.0)
 
-    with st.expander("DC fino 120 kW (per colonnina)", expanded=True):
-        dc_power = st.number_input("Potenza nominale DC (kW)", min_value=20.0, value=120.0, step=10.0)
-        dc_connectors = st.number_input("Connettori per colonnina DC", min_value=1, value=2, step=1)
-        dc_hw = st.number_input("Hardware DC (€)", min_value=5_000.0, value=45_000.0, step=1_000.0)
-        dc_install = st.number_input("Installazione + opere DC (€)", min_value=2_000.0, value=18_000.0, step=1_000.0)
-        dc_mnt = st.number_input("Manutenzione annua DC (€/a)", min_value=0.0, value=1_200.0, step=50.0)
-        dc_backend = st.number_input("Backend/CSMS annuo per colonnina DC (€/a)", min_value=0.0, value=420.0, step=20.0)
+    st.caption("Per confrontare tecnologie diverse, qui separiamo le DC in 3 taglie (30/60/90 kW).")
+
+    with st.expander("DC 30 kW (per colonnina)", expanded=True):
+        dc30_power = st.number_input("Potenza nominale DC30 (kW)", min_value=20.0, value=30.0, step=5.0)
+        dc30_connectors = st.number_input("Connettori per colonnina DC30", min_value=1, value=1, step=1)
+        dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=22_000.0, step=1_000.0)
+        dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=12_000.0, step=1_000.0)
+        dc30_mnt = st.number_input("Manutenzione annua DC30 (€/a)", min_value=0.0, value=900.0, step=50.0)
+        dc30_backend = st.number_input("Backend/CSMS annuo per colonnina DC30 (€/a)", min_value=0.0, value=420.0, step=20.0)
+
+    with st.expander("DC 60 kW (per colonnina)", expanded=True):
+        dc60_power = st.number_input("Potenza nominale DC60 (kW)", min_value=40.0, value=60.0, step=5.0)
+        dc60_connectors = st.number_input("Connettori per colonnina DC60", min_value=1, value=2, step=1)
+        dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=35_000.0, step=1_000.0)
+        dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=16_000.0, step=1_000.0)
+        dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=1_100.0, step=50.0)
+        dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=420.0, step=20.0)
+
+    with st.expander("DC 90 kW (per colonnina)", expanded=True):
+        dc90_power = st.number_input("Potenza nominale DC90 (kW)", min_value=60.0, value=90.0, step=5.0)
+        dc90_connectors = st.number_input("Connettori per colonnina DC90", min_value=1, value=2, step=1)
+        dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=45_000.0, step=1_000.0)
+        dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=18_000.0, step=1_000.0)
+        dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=1_250.0, step=50.0)
+        dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
     st.subheader("🧱 CAPEX extra sito")
     grid_connection_capex = st.number_input(
@@ -148,7 +166,13 @@ with st.sidebar:
 
     st.subheader("🔎 Ricerca combinazioni")
     max_ac = st.slider("Max colonnine AC da testare", 0, 60, 30)
-    max_dc = st.slider("Max colonnine DC da testare", 0, 20, 10)
+    cdc1, cdc2, cdc3 = st.columns(3)
+    with cdc1:
+        max_dc30 = st.slider("Max DC30 da testare", 0, 20, 6)
+    with cdc2:
+        max_dc60 = st.slider("Max DC60 da testare", 0, 20, 6)
+    with cdc3:
+        max_dc90 = st.slider("Max DC90 da testare", 0, 20, 6)
 
 
 # -----------------------
@@ -409,16 +433,32 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
     )
 
     ac_cost = TechCost(
+        name="AC22",
         capex_per_charger=float(ac_hw + ac_install),
         fixed_opex_per_charger_year=float(ac_mnt + ac_backend),
         connectors=int(ac_connectors),
         power_kw=float(ac_power),
     )
-    dc_cost = TechCost(
-        capex_per_charger=float(dc_hw + dc_install),
-        fixed_opex_per_charger_year=float(dc_mnt + dc_backend),
-        connectors=int(dc_connectors),
-        power_kw=float(dc_power),
+    dc30_cost = TechCost(
+        name="DC30",
+        capex_per_charger=float(dc30_hw + dc30_install),
+        fixed_opex_per_charger_year=float(dc30_mnt + dc30_backend),
+        connectors=int(dc30_connectors),
+        power_kw=float(dc30_power),
+    )
+    dc60_cost = TechCost(
+        name="DC60",
+        capex_per_charger=float(dc60_hw + dc60_install),
+        fixed_opex_per_charger_year=float(dc60_mnt + dc60_backend),
+        connectors=int(dc60_connectors),
+        power_kw=float(dc60_power),
+    )
+    dc90_cost = TechCost(
+        name="DC90",
+        capex_per_charger=float(dc90_hw + dc90_install),
+        fixed_opex_per_charger_year=float(dc90_mnt + dc90_backend),
+        connectors=int(dc90_connectors),
+        power_kw=float(dc90_power),
     )
 
     # Demand split year 1
@@ -428,6 +468,8 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
     opt_inp = OptimizationInputs(
         kwh_ac_year1=kwh_ac_year1,
         kwh_dc_year1=kwh_dc_year1,
+        uptime=float(uptime),
+        target_utilization=float(target_util),
         power_available_kw=float(power_available_kw),
         capex_budget=float(capex_budget - grid_connection_capex - signage_capex),
         years=int(years),
@@ -439,21 +481,25 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         fixed_opex_overhead_year1=float(overhead_opex),
         fixed_opex_overhead_growth_yoy=float(overhead_growth),
         max_ac=int(max_ac),
-        max_dc=int(max_dc),
+        max_dc30=int(max_dc30),
+        max_dc60=int(max_dc60),
+        max_dc90=int(max_dc90),
     )
 
-    best, allres = optimize_mix(opt_inp, ac=ac_cost, dc=dc_cost)
+    best, allres = optimize_mix_4tech(opt_inp, ac22=ac_cost, dc30=dc30_cost, dc60=dc60_cost, dc90=dc90_cost)
 
     st.markdown("#### Raccomandazione")
-    rec1, rec2, rec3, rec4 = st.columns(4)
-    rec1.metric("AC consigliate", best.n_ac)
-    rec2.metric("DC consigliate", best.n_dc)
-    rec3.metric("NPV", eur(best.npv))
-    rec4.metric("CAPEX (solo hardware+install)", eur(best.capex))
+    rec1, rec2, rec3, rec4, rec5 = st.columns(5)
+    rec1.metric("AC22", best.n_ac)
+    rec2.metric("DC30", best.n_dc30)
+    rec3.metric("DC60", best.n_dc60)
+    rec4.metric("DC90", best.n_dc90)
+    rec5.metric("NPV", eur(best.npv))
 
     st.info(
         f"Potenza installata (hardware): {num(best.power_installed_kw,0)} kW | "
         f"CAPEX extra sito: {eur(grid_connection_capex + signage_capex)} | "
+        f"kWh venduti anno 1: {num(best.kwh_sold_year1,0)} | "
         f"Note: {best.notes or '—'}"
     )
 
@@ -461,14 +507,29 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
     top = pd.DataFrame([asdict(x) for x in allres[:20]])
     if len(top) > 0:
         top["capex_total"] = top["capex"] + grid_connection_capex + signage_capex
-        st.dataframe(top[["n_ac","n_dc","npv","irr","payback","capex_total","power_installed_kw","notes"]], use_container_width=True)
+        st.dataframe(
+            top[[
+                "n_ac",
+                "n_dc30",
+                "n_dc60",
+                "n_dc90",
+                "kwh_sold_year1",
+                "npv",
+                "irr",
+                "payback",
+                "capex_total",
+                "power_installed_kw",
+                "notes",
+            ]],
+            use_container_width=True,
+        )
 
         fig = px.scatter(
             top,
             x="capex",
             y="npv",
             size="power_installed_kw",
-            hover_data=["n_ac","n_dc","payback","irr","notes"],
+            hover_data=["n_ac","n_dc30","n_dc60","n_dc90","kwh_sold_year1","payback","irr","notes"],
             title="Frontiera (Top 20): NPV vs CAPEX (hardware+install)",
         )
         st.plotly_chart(fig, use_container_width=True)
