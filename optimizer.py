@@ -14,6 +14,8 @@ class TechCost:
     fixed_opex_per_charger_year: float
     connectors: int
     power_kw: float
+    # Average hours per day the charger is available for charging.
+    hours_per_day: float = 24.0
 
 
 @dataclass
