@@ -406,13 +406,33 @@ with finance_tab:
         lost_kwh_year1 = float(max(0.0, demand_kwh_year1 - cap_kwh_year))
 
         # --- Lato domanda (auto / sessioni) per rendere la stima "reale"
-        # Nota: assumiamo 1 sessione ~ 1 auto che ricarica (modello semplice)
-        bev_vehicles_day = float(vehicles_per_day) * float(bev_share)
-        vehicles_charging_day = float(bev_vehicles_day) * float(share_bev_that_charge)
-        sessions_day = float(vehicles_charging_day)
-        sessions_dc_day = sessions_day * float(share_sessions_dc)
-        sessions_ac_day = sessions_day - sessions_dc_day
+        # Nota: modello semplice: 1 sessione ~ 1 auto che ricarica.
+        # In modalità "Ho dati parcheggio" abbiamo anche il numero totale auto/giorno.
+        is_parking_mode = demand_mode.startswith("Ho dati")
+
+        # Sessioni e kWh/giorno: sempre disponibili via dres (anche nel funnel)
+        sessions_day = float(
+            getattr(
+                dres,
+                "sessions_per_day",
+                (demand_kwh_year1 / 365.0)
+                / max(
+                    ((1 - share_sessions_dc) * kwh_per_session_ac + share_sessions_dc * kwh_per_session_dc),
+                    1e-6,
+                ),
+            )
+        )
+        sessions_ac_day = float(getattr(dres, "sessions_ac_per_day", sessions_day * (1 - float(share_sessions_dc))))
+        sessions_dc_day = float(getattr(dres, "sessions_dc_per_day", sessions_day * float(share_sessions_dc)))
+
+        # Auto che ricaricano ~ sessioni
+        vehicles_charging_day = sessions_day
         vehicles_charging_year = sessions_day * 365.0
+
+        # Auto totali e BEV/giorno: solo se abbiamo dati parcheggio
+        vehicles_per_day_val = float(getattr(dinp, "vehicles_per_day", 0.0)) if is_parking_mode else None
+        bev_vehicles_day = (vehicles_per_day_val * float(bev_share)) if vehicles_per_day_val is not None else None
+
         demand_vs_capacity = float(demand_kwh_year1) / max(float(cap_kwh_year), 1e-9)
 
         st.metric("CAPEX totale", eur(capex))
@@ -422,8 +442,8 @@ with finance_tab:
 
         st.markdown("#### Domanda (Year 1)")
         d1, d2, d3, d4 = st.columns(4)
-        d1.metric("Auto/giorno (tot)", num(vehicles_per_day, 0))
-        d2.metric("BEV/giorno", num(bev_vehicles_day, 1))
+        d1.metric("Auto/giorno (tot)", num(vehicles_per_day_val, 0) if vehicles_per_day_val is not None else "—")
+        d2.metric("BEV/giorno", num(bev_vehicles_day, 1) if bev_vehicles_day is not None else "—")
         d3.metric("Auto che ricaricano/giorno", num(vehicles_charging_day, 1))
         d4.metric("Auto che ricaricano/anno", num(vehicles_charging_year, 0))
 
