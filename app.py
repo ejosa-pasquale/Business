@@ -125,6 +125,7 @@ with st.sidebar:
         ac_connectors = st.number_input("Connettori per colonnina AC", min_value=1, value=2, step=1)
         ac_hw = st.number_input("Hardware AC (€)", min_value=500.0, value=2_000.0, step=100.0)
         ac_install = st.number_input("Installazione + opere AC (€)", min_value=500.0, value=2_500.0, step=100.0)
+        ac_opex_year = st.number_input("OPEX fisso AC (€/anno per colonnina)", min_value=0.0, value=300.0, step=50.0)
         ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=120.0, step=10.0)
         ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=180.0, step=10.0)
 
@@ -135,6 +136,7 @@ with st.sidebar:
         dc30_connectors = st.number_input("Connettori per colonnina DC30", min_value=1, value=1, step=1)
         dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=22_000.0, step=1_000.0)
         dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=12_000.0, step=1_000.0)
+        dc30_opex_year = st.number_input("OPEX fisso DC30 (€/anno per colonnina)", min_value=0.0, value=600.0, step=50.0)
         dc30_mnt = st.number_input("Manutenzione annua DC30 (€/a)", min_value=0.0, value=900.0, step=50.0)
         dc30_backend = st.number_input("Backend/CSMS annuo per colonnina DC30 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
@@ -143,6 +145,7 @@ with st.sidebar:
         dc60_connectors = st.number_input("Connettori per colonnina DC60", min_value=1, value=2, step=1)
         dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=35_000.0, step=1_000.0)
         dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=16_000.0, step=1_000.0)
+        dc60_opex_year = st.number_input("OPEX fisso DC60 (€/anno per colonnina)", min_value=0.0, value=700.0, step=50.0)
         dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=1_100.0, step=50.0)
         dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
@@ -151,6 +154,7 @@ with st.sidebar:
         dc90_connectors = st.number_input("Connettori per colonnina DC90", min_value=1, value=2, step=1)
         dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=45_000.0, step=1_000.0)
         dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=18_000.0, step=1_000.0)
+        dc90_opex_year = st.number_input("OPEX fisso DC90 (€/anno per colonnina)", min_value=0.0, value=800.0, step=50.0)
         dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=1_250.0, step=50.0)
         dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
