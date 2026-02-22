@@ -25,6 +25,12 @@ from optimizer_multi import TechCost, OptimizationInputs, optimize_mix_4tech
 from formatting import eur, pct, num
 
 
+def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: int, uptime: float, target_util: float) -> float:
+    """Energy throughput capacity at target utilization (kWh/year)."""
+    return float(n_chargers) * float(connectors_per_charger) * float(power_kw) * 8760.0 * float(uptime) * float(target_util)
+
+
+
 st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
@@ -308,8 +314,19 @@ with sizing_tab:
         st.metric("Utilizzo richiesto (energy-based)", pct(sres_ac.achieved_utilization))
 
     with cB:
-        st.markdown("#### DC fino 120 kW")
-        tech_dc = ChargerTech(name="DC", power_kw=float(dc_power), connectors=int(dc_connectors))
+        st.markdown("#### DC (scegli taglia per sizing)")
+        dc_sizing_choice = st.selectbox("Taglia DC per sizing", ["30 kW", "60 kW", "90 kW"], index=1)
+        if dc_sizing_choice.startswith("30"):
+            _dc_power = dc30_power
+            _dc_connectors = dc30_connectors
+        elif dc_sizing_choice.startswith("60"):
+            _dc_power = dc60_power
+            _dc_connectors = dc60_connectors
+        else:
+            _dc_power = dc90_power
+            _dc_connectors = dc90_connectors
+
+        tech_dc = ChargerTech(name=f"DC {dc_sizing_choice}", power_kw=float(_dc_power), connectors=int(_dc_connectors))
         s_inp_dc = SizingInputs(
             demand_kwh_per_day=float(dres.kwh_dc_per_day),
             demand_sessions_per_day=float(dres.sessions_dc_per_day),
@@ -322,6 +339,7 @@ with sizing_tab:
         st.metric("Connettori richiesti", sres_dc.required_connectors)
         st.metric("Colonnine richieste", sres_dc.required_chargers)
         st.metric("Utilizzo richiesto (energy-based)", pct(sres_dc.achieved_utilization))
+        st.metric("Utilizzo richiesto (energy-based)", pct(sres_dc.achieved_utilization))
 
     st.markdown("#### Sintesi domanda")
     k1, k2, k3, k4 = st.columns(4)
@@ -331,7 +349,7 @@ with sizing_tab:
     k4.metric("Mix DC sessioni", pct(share_sessions_dc))
 
     # Power feasibility check
-    installed_power_req = sres_ac.required_chargers * ac_power + sres_dc.required_chargers * dc_power
+    installed_power_req = sres_ac.required_chargers * ac_power + sres_dc.required_chargers * tech_dc.power_kw
     st.info(
         f"Potenza installata (sizing minimo): {num(installed_power_req,0)} kW vs Potenza disponibile: {num(power_available_kw,0)} kW"
     )
@@ -343,29 +361,62 @@ with finance_tab:
     # Default configuration: use sizing results, but allow overrides
     left, right = st.columns([1, 1])
     with left:
-        st.markdown("#### Configurazione")
-        n_ac = st.number_input("Colonnine AC", min_value=0, value=int(sres_ac.required_chargers), step=1)
-        n_dc = st.number_input("Colonnine DC", min_value=0, value=int(sres_dc.required_chargers), step=1)
+        st.markdown("#### Configurazione (manuale)")
+
+        # Suggerimento: usa lo sizing AC e un sizing DC "tipo" (vedi tab precedente) solo come riferimento
+        n_ac = st.number_input("Colonnine AC 22 kW", min_value=0, value=int(sres_ac.required_chargers), step=1)
+
+        st.markdown("**DC (mix di taglie)**")
+        n_dc30 = st.number_input("Colonnine DC 30 kW", min_value=0, value=0, step=1)
+        n_dc60 = st.number_input("Colonnine DC 60 kW", min_value=0, value=int(sres_dc.required_chargers), step=1)
+        n_dc90 = st.number_input("Colonnine DC 90 kW", min_value=0, value=0, step=1)
 
         capex = (
             n_ac * (ac_hw + ac_install)
-            + n_dc * (dc_hw + dc_install)
+            + n_dc30 * (dc30_hw + dc30_install)
+            + n_dc60 * (dc60_hw + dc60_install)
+            + n_dc90 * (dc90_hw + dc90_install)
             + grid_connection_capex
             + signage_capex
         )
+
         fixed_opex_year1 = (
             overhead_opex
             + n_ac * (ac_mnt + ac_backend)
-            + n_dc * (dc_mnt + dc_backend)
+            + n_dc30 * (dc30_mnt + dc30_backend)
+            + n_dc60 * (dc60_mnt + dc60_backend)
+            + n_dc90 * (dc90_mnt + dc90_backend)
         )
+
+        installed_power_kw = (
+            n_ac * ac_power
+            + n_dc30 * dc30_power
+            + n_dc60 * dc60_power
+            + n_dc90 * dc90_power
+        )
+
+        # Capacità kWh/anno a target_util (anti-coda)
+        cap_kwh_year = (
+            kwh_capacity_year(n_ac, ac_power, ac_connectors, uptime, target_util)
+            + kwh_capacity_year(n_dc30, dc30_power, dc30_connectors, uptime, target_util)
+            + kwh_capacity_year(n_dc60, dc60_power, dc60_connectors, uptime, target_util)
+            + kwh_capacity_year(n_dc90, dc90_power, dc90_connectors, uptime, target_util)
+        )
+        kwh_sold_year1_fin = float(min(demand_kwh_year1, cap_kwh_year))
+        lost_kwh_year1 = float(max(0.0, demand_kwh_year1 - cap_kwh_year))
 
         st.metric("CAPEX totale", eur(capex))
         st.metric("OPEX fisso anno 1", eur(fixed_opex_year1))
-        st.metric("Potenza installata", f"{num(n_ac*ac_power + n_dc*dc_power, 0)} kW")
+        st.metric("Potenza installata", f"{num(installed_power_kw, 0)} kW")
+        st.metric("kWh vendibili (Year 1, a target_util)", num(kwh_sold_year1_fin, 0))
+
+        if lost_kwh_year1 > 1:
+            st.warning(f"Domanda > capacità: perdi ~{num(lost_kwh_year1,0)} kWh nel Year 1 (a target_util).")
 
         if capex > capex_budget:
             st.warning("CAPEX sopra il budget impostato in sidebar.")
-        if (n_ac*ac_power + n_dc*dc_power) > power_available_kw:
+        if installed_power_kw > power_available_kw:
+            st.warning("Potenza installata sopra la potenza disponibile.")
             st.warning("Potenza installata sopra la potenza disponibile.")
 
     with right:
@@ -377,7 +428,7 @@ with finance_tab:
             capex_total=float(capex),
             price_sell_eur_per_kwh=float(sell_price),
             price_buy_eur_per_kwh=float(buy_price),
-            kwh_sold_year1=float(demand_kwh_year1),
+            kwh_sold_year1=float(kwh_sold_year1_fin),
             kwh_growth_yoy=float(kwh_growth),
             fixed_opex_year1=float(fixed_opex_year1),
             fixed_opex_growth_yoy=float(overhead_growth),
@@ -615,13 +666,29 @@ Puoi incollare qui l'URL *diretto* al CSV oppure caricare il file.
                 "mnt": ac_mnt,
                 "backend": ac_backend,
             },
-            "dc": {
-                "power": dc_power,
-                "connectors": dc_connectors,
-                "hw": dc_hw,
-                "install": dc_install,
-                "mnt": dc_mnt,
-                "backend": dc_backend,
+            "dc30": {
+                "power": dc30_power,
+                "connectors": dc30_connectors,
+                "hw": dc30_hw,
+                "install": dc30_install,
+                "mnt": dc30_mnt,
+                "backend": dc30_backend,
+            },
+            "dc60": {
+                "power": dc60_power,
+                "connectors": dc60_connectors,
+                "hw": dc60_hw,
+                "install": dc60_install,
+                "mnt": dc60_mnt,
+                "backend": dc60_backend,
+            },
+            "dc90": {
+                "power": dc90_power,
+                "connectors": dc90_connectors,
+                "hw": dc90_hw,
+                "install": dc90_install,
+                "mnt": dc90_mnt,
+                "backend": dc90_backend,
             },
             "capex_extra": {
                 "grid_connection": grid_connection_capex,
