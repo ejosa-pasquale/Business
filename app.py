@@ -31,7 +31,7 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 
 
-st.set_page_config(page_title="Pallaoro Group EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
     """
@@ -62,8 +62,8 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Pallaoro Group EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
-  <p>Business Y35 -eV Field Service</p>
+  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
 </div>
 """,
     unsafe_allow_html=True,
@@ -125,6 +125,7 @@ with st.sidebar:
         ac_connectors = st.number_input("Connettori per colonnina AC", min_value=1, value=2, step=1)
         ac_hw = st.number_input("Hardware AC (€)", min_value=500.0, value=2_000.0, step=100.0)
         ac_install = st.number_input("Installazione + opere AC (€)", min_value=500.0, value=2_500.0, step=100.0)
+        ac_opex_year = st.number_input("OPEX fisso AC (€/anno per colonnina)", min_value=0.0, value=300.0, step=50.0)
         ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=120.0, step=10.0)
         ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=180.0, step=10.0)
 
@@ -135,6 +136,7 @@ with st.sidebar:
         dc30_connectors = st.number_input("Connettori per colonnina DC30", min_value=1, value=1, step=1)
         dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=22_000.0, step=1_000.0)
         dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=12_000.0, step=1_000.0)
+        dc30_opex_year = st.number_input("OPEX fisso DC30 (€/anno per colonnina)", min_value=0.0, value=600.0, step=50.0)
         dc30_mnt = st.number_input("Manutenzione annua DC30 (€/a)", min_value=0.0, value=900.0, step=50.0)
         dc30_backend = st.number_input("Backend/CSMS annuo per colonnina DC30 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
@@ -143,6 +145,7 @@ with st.sidebar:
         dc60_connectors = st.number_input("Connettori per colonnina DC60", min_value=1, value=2, step=1)
         dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=35_000.0, step=1_000.0)
         dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=16_000.0, step=1_000.0)
+        dc60_opex_year = st.number_input("OPEX fisso DC60 (€/anno per colonnina)", min_value=0.0, value=700.0, step=50.0)
         dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=1_100.0, step=50.0)
         dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
@@ -151,6 +154,7 @@ with st.sidebar:
         dc90_connectors = st.number_input("Connettori per colonnina DC90", min_value=1, value=2, step=1)
         dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=45_000.0, step=1_000.0)
         dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=18_000.0, step=1_000.0)
+        dc90_opex_year = st.number_input("OPEX fisso DC90 (€/anno per colonnina)", min_value=0.0, value=800.0, step=50.0)
         dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=1_250.0, step=50.0)
         dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=420.0, step=20.0)
 
@@ -205,11 +209,7 @@ if demand_mode.startswith("Ho dati"):
         else:
             df_raw = None
             if sample:
-                try:
-                    df_raw = pd.read_csv("sample_data/parking_sample.csv")
-                except FileNotFoundError:
-                    st.warning("sample_data/parking_sample.csv non presente su questo deploy. Carica un CSV oppure disattiva sample.")
-                    df_raw = None
+                df_raw = pd.read_csv("sample_data/parking_sample.csv")
 
         if df_raw is not None:
             try:
@@ -361,6 +361,214 @@ with sizing_tab:
         f"Potenza installata (sizing minimo): {num(installed_power_req,0)} kW vs Potenza disponibile: {num(power_available_kw,0)} kW"
     )
 
+    st.markdown("---")
+    st.markdown("### Sizing suggerito (5 anni, crescita domanda)")
+    with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", expanded=False):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            start_sessions_day = st.number_input("Sessioni/giorno iniziali (auto che ricaricano)", min_value=0.0, value=float(dres.sessions_per_day), step=1.0)
+            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", 0, 100, int(share_sessions_dc*100), step=5) / 100.0
+        with c2:
+            growth_yoy_suggest = st.slider("Crescita annua domanda (%)", 0.0, 80.0, 35.0, step=1.0) / 100.0
+            years_suggest = st.selectbox("Orizzonte (anni)", [3, 4, 5, 6, 7, 10], index=2)
+        with c3:
+            objective = st.selectbox("Obiettivo", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
+            capex_budget_chargers = float(max(capex_budget - grid_connection_capex - signage_capex, 0.0))
+            st.caption(f"Budget colonnine (CAPEX max - costi sito): {num(capex_budget_chargers,0)} €")
+
+        # Domanda Year 1 derivata da sessioni iniziali
+        sessions_ac_day_s = float(start_sessions_day) * (1.0 - float(share_dc_for_suggest))
+        sessions_dc_day_s = float(start_sessions_day) * float(share_dc_for_suggest)
+        kwh_ac_year1_s = sessions_ac_day_s * float(kwh_per_session_ac) * 365.0
+        kwh_dc_year1_s = sessions_dc_day_s * float(kwh_per_session_dc) * 365.0
+        tot_kwh_s = max(kwh_ac_year1_s + kwh_dc_year1_s, 1e-9)
+        blended_sell_price_s = (float(sell_price_ac) * kwh_ac_year1_s + float(sell_price_dc) * kwh_dc_year1_s) / tot_kwh_s
+
+        # Definizione tecnologie per ottimizzatore (include ore operative)
+        ac_cost_s = TechCost(name="AC22", capex_per_charger=float(ac_hw + ac_install), fixed_opex_per_charger_year=float(ac_opex_year), connectors=int(ac_connectors), power_kw=float(ac_power), hours_per_day=float(hours_ac))
+        dc30_cost_s = TechCost(name="DC30", capex_per_charger=float(dc30_hw + dc30_install), fixed_opex_per_charger_year=float(dc30_opex_year), connectors=int(dc30_connectors), power_kw=float(dc30_power), hours_per_day=float(hours_dc))
+        dc60_cost_s = TechCost(name="DC60", capex_per_charger=float(dc60_hw + dc60_install), fixed_opex_per_charger_year=float(dc60_opex_year), connectors=int(dc60_connectors), power_kw=float(dc60_power), hours_per_day=float(hours_dc))
+        dc90_cost_s = TechCost(name="DC90", capex_per_charger=float(dc90_hw + dc90_install), fixed_opex_per_charger_year=float(dc90_opex_year), connectors=int(dc90_connectors), power_kw=float(dc90_power), hours_per_day=float(hours_dc))
+
+        opt_inp_s = OptimizationInputs(
+            kwh_ac_year1=float(kwh_ac_year1_s),
+            kwh_dc_year1=float(kwh_dc_year1_s),
+            uptime=float(uptime),
+            target_utilization=float(target_util),
+            power_available_kw=float(power_available_kw),
+            capex_budget=float(capex_budget_chargers),
+            years=int(years_suggest),
+            discount_rate=float(discount_rate),
+            price_sell_eur_per_kwh=float(blended_sell_price_s),
+            price_buy_eur_per_kwh=float(buy_price),
+            kwh_growth_yoy=float(growth_yoy_suggest),
+            variable_opex_per_kwh=float(variable_fee),
+            fixed_opex_overhead_year1=float(overhead_opex),
+            fixed_opex_overhead_growth_yoy=float(overhead_growth),
+            max_ac=int(max_ac),
+            max_dc30=int(max_dc30),
+            max_dc60=int(max_dc60),
+            max_dc90=int(max_dc90),
+        )
+
+        best_s, all_s = optimize_mix_4tech(opt_inp_s, ac22=ac_cost_s, dc30=dc30_cost_s, dc60=dc60_cost_s, dc90=dc90_cost_s)
+
+        import pandas as pd
+        df_all = pd.DataFrame([r.__dict__ for r in all_s])
+        df_all["capex_total"] = df_all["capex"] + float(grid_connection_capex) + float(signage_capex)
+        df_all["npv_per_capex"] = df_all["npv"] / df_all["capex_total"].replace({0: float('nan')})
+
+        if objective == "Massimizza NPV/Capex":
+            df_valid = df_all.dropna(subset=["npv_per_capex"])
+            if len(df_valid) > 0:
+                row = df_valid.sort_values("npv_per_capex", ascending=False).iloc[0]
+                best_s = best_s.__class__(**{k: row[k] for k in best_s.__dict__.keys()})
+
+        st.success("Configurazione suggerita (entro vincoli di potenza e budget)")
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("AC22", int(best_s.n_ac))
+        m2.metric("DC30", int(best_s.n_dc30))
+        m3.metric("DC60", int(best_s.n_dc60))
+        m4.metric("DC90", int(best_s.n_dc90))
+        m5.metric("Potenza installata", f"{num(best_s.power_installed_kw,0)} kW")
+        st.write(f"**CAPEX colonnine:** {num(best_s.capex,0)} €  |  **CAPEX totale (incl. sito):** {num(best_s.capex + grid_connection_capex + signage_capex,0)} €")
+        st.write(f"**kWh venduti Year 1:** {num(best_s.kwh_sold_year1,0)}  |  **NPV:** {num(best_s.npv,0)}  |  **IRR:** {pct(best_s.irr)}  |  **Payback:** {num(best_s.payback,1)} anni")
+        if str(best_s.notes).strip():
+            st.caption(f"Note: {best_s.notes}")
+
+        st.markdown("#### Frontiera (NPV vs CAPEX)")
+        st.scatter_chart(df_all, x="capex_total", y="npv")
+        st.caption("Ogni punto è un mix (AC22/DC30/DC60/DC90) entro vincoli. Usa l'obiettivo per scegliere il compromesso.")
+
+
+
+st.markdown("---")
+st.markdown("### Sizing suggerito (5 anni, crescita domanda)")
+with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", expanded=False):
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        start_sessions_day = st.number_input(
+            "Sessioni/giorno iniziali (auto che ricaricano)",
+            min_value=0.0,
+            value=float(getattr(dres, "sessions_per_day", 0.0)),
+            step=1.0,
+        )
+        share_dc_for_suggest = st.slider(
+            "Quota sessioni DC (%)",
+            0,
+            100,
+            int(float(share_sessions_dc) * 100),
+            step=5,
+        ) / 100.0
+    with c2:
+        growth_yoy_suggest = st.slider("Crescita annua domanda (%)", 0.0, 80.0, 35.0, step=1.0) / 100.0
+        years_suggest = st.selectbox("Orizzonte (anni)", [3, 4, 5, 6, 7, 10], index=2)
+    with c3:
+        objective = st.selectbox("Obiettivo", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
+        capex_budget_chargers = float(max(capex_budget - grid_connection_capex - signage_capex, 0.0))
+        st.caption(f"Budget colonnine (CAPEX max - costi sito): {num(capex_budget_chargers,0)} €")
+
+    # Domanda Year 1 derivata da sessioni iniziali (modello semplice: 1 sessione ~ 1 auto che ricarica)
+    sessions_ac_day_s = float(start_sessions_day) * (1.0 - float(share_dc_for_suggest))
+    sessions_dc_day_s = float(start_sessions_day) * float(share_dc_for_suggest)
+    kwh_ac_year1_s = sessions_ac_day_s * float(kwh_per_session_ac) * 365.0
+    kwh_dc_year1_s = sessions_dc_day_s * float(kwh_per_session_dc) * 365.0
+    tot_kwh_s = max(kwh_ac_year1_s + kwh_dc_year1_s, 1e-9)
+    blended_sell_price_s = (float(sell_price_ac) * kwh_ac_year1_s + float(sell_price_dc) * kwh_dc_year1_s) / tot_kwh_s
+
+    # Definizione tecnologie per ottimizzatore (include ore operative)
+    ac_cost_s = TechCost(
+        name="AC22",
+        capex_per_charger=float(ac_hw + ac_install),
+        fixed_opex_per_charger_year=float(ac_mnt + ac_backend),
+        connectors=int(ac_connectors),
+        power_kw=float(ac_power),
+        hours_per_day=float(hours_ac),
+    )
+    dc30_cost_s = TechCost(
+        name="DC30",
+        capex_per_charger=float(dc30_hw + dc30_install),
+        fixed_opex_per_charger_year=float(dc30_mnt + dc30_backend),
+        connectors=int(dc30_connectors),
+        power_kw=float(dc30_power),
+        hours_per_day=float(hours_dc),
+    )
+    dc60_cost_s = TechCost(
+        name="DC60",
+        capex_per_charger=float(dc60_hw + dc60_install),
+        fixed_opex_per_charger_year=float(dc60_mnt + dc60_backend),
+        connectors=int(dc60_connectors),
+        power_kw=float(dc60_power),
+        hours_per_day=float(hours_dc),
+    )
+    dc90_cost_s = TechCost(
+        name="DC90",
+        capex_per_charger=float(dc90_hw + dc90_install),
+        fixed_opex_per_charger_year=float(dc90_mnt + dc90_backend),
+        connectors=int(dc90_connectors),
+        power_kw=float(dc90_power),
+        hours_per_day=float(hours_dc),
+    )
+
+    opt_inp_s = OptimizationInputs(
+        kwh_ac_year1=float(kwh_ac_year1_s),
+        kwh_dc_year1=float(kwh_dc_year1_s),
+        uptime=float(uptime),
+        target_utilization=float(target_util),
+        power_available_kw=float(power_available_kw),
+        capex_budget=float(capex_budget_chargers),
+        years=int(years_suggest),
+        discount_rate=float(discount_rate),
+        price_sell_eur_per_kwh=float(blended_sell_price_s),
+        price_buy_eur_per_kwh=float(buy_price),
+        kwh_growth_yoy=float(growth_yoy_suggest),
+        variable_opex_per_kwh=float(variable_fee),
+        fixed_opex_overhead_year1=float(overhead_opex),
+        fixed_opex_overhead_growth_yoy=float(overhead_growth),
+        max_ac=int(max_ac),
+        max_dc30=int(max_dc30),
+        max_dc60=int(max_dc60),
+        max_dc90=int(max_dc90),
+    )
+
+    best_s, all_s = optimize_mix_4tech(
+        opt_inp_s,
+        ac22=ac_cost_s,
+        dc30=dc30_cost_s,
+        dc60=dc60_cost_s,
+        dc90=dc90_cost_s,
+    )
+
+    import pandas as pd
+    df_all = pd.DataFrame([r.__dict__ for r in all_s])
+    df_all["capex_total"] = df_all["capex"] + float(grid_connection_capex) + float(signage_capex)
+    df_all["npv_per_capex"] = df_all["npv"] / df_all["capex_total"].replace({0: float("nan")})
+
+    if objective == "Massimizza NPV/Capex":
+        df_valid = df_all.dropna(subset=["npv_per_capex"])
+        if len(df_valid) > 0:
+            row = df_valid.sort_values("npv_per_capex", ascending=False).iloc[0]
+            best_s = best_s.__class__(**{k: row[k] for k in best_s.__dict__.keys()})
+
+    st.success("Configurazione suggerita (entro vincoli di potenza e budget)")
+    m1, m2, m3, m4, m5 = st.columns(5)
+    m1.metric("AC22", int(best_s.n_ac))
+    m2.metric("DC30", int(best_s.n_dc30))
+    m3.metric("DC60", int(best_s.n_dc60))
+    m4.metric("DC90", int(best_s.n_dc90))
+    m5.metric("Potenza installata", f"{num(best_s.power_installed_kw,0)} kW")
+    st.write(
+        f"**CAPEX colonnine:** {num(best_s.capex,0)} €  |  **CAPEX totale (incl. sito):** {num(best_s.capex + grid_connection_capex + signage_capex,0)} €"
+    )
+    st.write(
+        f"**kWh venduti Year 1:** {num(best_s.kwh_sold_year1,0)}  |  **NPV:** {num(best_s.npv,0)}  |  **IRR:** {pct(best_s.irr)}  |  **Payback:** {num(best_s.payback,1)} anni"
+    )
+    if str(getattr(best_s, "notes", "")).strip():
+        st.caption(f"Note: {best_s.notes}")
+
+    st.markdown("#### Frontiera (NPV vs CAPEX)")
+    st.scatter_chart(df_all, x="capex_total", y="npv")
+    st.caption("Ogni punto è un mix (AC22/DC30/DC60/DC90) entro vincoli. Usa l'obiettivo per scegliere il compromesso.")
 
 with finance_tab:
     st.markdown("### 3) Business Case — CAPEX/OPEX/ROI")
