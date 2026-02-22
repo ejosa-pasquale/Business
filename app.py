@@ -40,7 +40,7 @@ st.markdown(
     .hero {
         background: linear-gradient(90deg, #0F172A 0%, #0EA5E9 55%, #22C55E 100%);
         padding: 1.4rem 1.6rem;
-        border-radius: 18px;
+        border-radius: 14px;
         color: white;
         margin-bottom: 1rem;
     }
@@ -49,7 +49,7 @@ st.markdown(
     .card {
         background: white;
         border: 1px solid #E2E8F0;
-        border-radius: 14px;
+        border-radius: 12px;
         padding: 1rem;
         box-shadow: 0 1px 2px rgba(15,23,42,0.06);
     }
