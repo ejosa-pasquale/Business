@@ -568,7 +568,7 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_per_charger=float(ac_hw + ac_install),
         fixed_opex_per_charger_year=float(ac_mnt + ac_backend),
         connectors=int(ac_connectors),
-        power_kw=float(ac_power),,
+        power_kw=float(ac_power),
         hours_per_day=float(hours_ac),
     )
     dc30_cost = TechCost(
