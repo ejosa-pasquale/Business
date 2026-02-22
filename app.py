@@ -5,7 +5,6 @@ import sys
 import pandas as pd
 import streamlit as st
 
-# Flat imports (same folder)
 from common import fetch_csv, parse_parking_csv, format_eur, format_pct
 from trento_chargers import summarize_trento_chargers
 from parking_occupancy import estimate_daily_traffic_from_parking
@@ -169,9 +168,11 @@ with tabs[2]:
         cap_ac = compute_capacity_kwh_per_year(ac_power_kw, uptime, target_util) * sizing["n_ac"]
         cap_dc = compute_capacity_kwh_per_year(dc_power_kw, uptime, target_util) * sizing["n_dc"]
         st.markdown("### Capacità annua a target utilizzo")
-        st.write(f"- AC: **{cap_ac:,.0f} kWh/anno**
+        st.markdown(
+            f"""- AC: **{cap_ac:,.0f} kWh/anno**
 - DC: **{cap_dc:,.0f} kWh/anno**
-- Totale: **{(cap_ac+cap_dc):,.0f} kWh/anno**")
+- Totale: **{(cap_ac + cap_dc):,.0f} kWh/anno**"""
+        )
 
         st.session_state["config"] = {
             "n_ac": sizing["n_ac"],
