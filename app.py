@@ -230,7 +230,7 @@ if demand_mode.startswith("Ho dati"):
                 st.error(f"Errore parsing CSV: {e}")
 
     with c2:
-        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Lo stimatore veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>La stima veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
         vehicles_override = st.number_input(
             "Override veicoli/giorno (se conosci il dato)",
             min_value=0.0,
