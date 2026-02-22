@@ -1,76 +1,81 @@
+# demand.py - flat layout demand models
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Optional, Dict
 
-import numpy as np
-import pandas as pd
+def demand_from_parking_model(
+    daily_traffic: float,
+    bev_share: float,
+    charge_take_rate: float,
+    kwh_per_session_ac: float,
+    kwh_per_session_dc: float,
+    share_dc: float = 0.25,
+    days_per_year: int = 365,
+) -> dict:
+    '''
+    Estimate annual demand (kWh/year) from parking traffic.
 
+    Inputs:
+      - daily_traffic: vehicles/day
+      - bev_share: fraction of vehicles that are BEV (0..1)
+      - charge_take_rate: fraction of BEV that choose to charge on site (0..1)
+      - kwh_per_session_ac/dc: average energy per charging session
+      - share_dc: fraction of charging sessions that are DC (0..1)
 
-@dataclass
-class DemandInputs:
-    # Parking flow side
-    vehicles_per_day: float
-    bev_share: float
-    share_bev_that_charge: float
-    kwh_per_session_ac: float
-    kwh_per_session_dc: float
-    share_sessions_dc: float  # fraction of charging sessions that choose DC
+    Output dict includes kWh/year, sessions/year split, etc.
+    '''
+    daily_traffic = max(0.0, float(daily_traffic))
+    bev_share = min(max(0.0, float(bev_share)), 1.0)
+    charge_take_rate = min(max(0.0, float(charge_take_rate)), 1.0)
+    share_dc = min(max(0.0, float(share_dc)), 1.0)
+    days_per_year = int(days_per_year)
 
+    bev_daily = daily_traffic * bev_share
+    sessions_daily = bev_daily * charge_take_rate
 
-@dataclass
-class DemandResult:
-    sessions_per_day: float
-    sessions_ac_per_day: float
-    sessions_dc_per_day: float
-    kwh_per_day: float
-    kwh_ac_per_day: float
-    kwh_dc_per_day: float
+    sessions_dc_daily = sessions_daily * share_dc
+    sessions_ac_daily = sessions_daily * (1.0 - share_dc)
 
+    kwh_daily = sessions_ac_daily * float(kwh_per_session_ac) + sessions_dc_daily * float(kwh_per_session_dc)
+    kwh_year = kwh_daily * days_per_year
 
-def demand_from_parking(inp: DemandInputs) -> DemandResult:
-    bev_vehicles = inp.vehicles_per_day * inp.bev_share
-    sessions = bev_vehicles * inp.share_bev_that_charge
-
-    sessions_dc = sessions * inp.share_sessions_dc
-    sessions_ac = sessions - sessions_dc
-
-    kwh_dc = sessions_dc * inp.kwh_per_session_dc
-    kwh_ac = sessions_ac * inp.kwh_per_session_ac
-
-    return DemandResult(
-        sessions_per_day=float(sessions),
-        sessions_ac_per_day=float(sessions_ac),
-        sessions_dc_per_day=float(sessions_dc),
-        kwh_per_day=float(kwh_ac + kwh_dc),
-        kwh_ac_per_day=float(kwh_ac),
-        kwh_dc_per_day=float(kwh_dc),
-    )
-
-
-@dataclass
-class FunnelInputs:
-    bev_2030: int
-    kwh_per_bev_year: float
-    public_share: float
-    capture_share: float
+    return {
+        "daily_traffic": daily_traffic,
+        "bev_daily": bev_daily,
+        "sessions_daily": sessions_daily,
+        "sessions_ac_daily": sessions_ac_daily,
+        "sessions_dc_daily": sessions_dc_daily,
+        "kwh_daily": kwh_daily,
+        "kwh_year": kwh_year,
+        "share_dc": share_dc,
+    }
 
 
-def demand_from_funnel(inp: FunnelInputs) -> float:
-    """Annual kWh captured by the site."""
-    return float(inp.bev_2030) * float(inp.kwh_per_bev_year) * float(inp.public_share) * float(inp.capture_share)
+def demand_from_funnel_model(
+    bev_count: int,
+    kwh_per_bev_year: float,
+    public_share: float,
+    capture: float,
+) -> dict:
+    '''
+    Macro funnel:
+      total_kwh = bev_count * kwh_per_bev_year
+      public_kwh = total_kwh * public_share
+      site_kwh = public_kwh * capture
+    '''
+    bev_count = max(0, int(bev_count))
+    kwh_per_bev_year = max(0.0, float(kwh_per_bev_year))
+    public_share = min(max(0.0, float(public_share)), 1.0)
+    capture = min(max(0.0, float(capture)), 1.0)
 
+    total_kwh = bev_count * kwh_per_bev_year
+    public_kwh = total_kwh * public_share
+    site_kwh = public_kwh * capture
 
-def cagr(v0: float, v1: float, years: int) -> float:
-    v0 = max(float(v0), 1e-9)
-    v1 = max(float(v1), 1e-9)
-    years = max(int(years), 1)
-    return (v1 / v0) ** (1 / years) - 1
-
-
-def forecast_path(start_year: int, start_value: float, end_year: int, end_value: float) -> pd.DataFrame:
-    """Simple exponential path."""
-    years = end_year - start_year
-    r = cagr(start_value, end_value, years)
-    vals = [start_value * ((1 + r) ** i) for i in range(0, years + 1)]
-    return pd.DataFrame({"year": list(range(start_year, end_year + 1)), "value": vals})
+    return {
+        "bev_count": bev_count,
+        "total_kwh": total_kwh,
+        "public_kwh": public_kwh,
+        "kwh_year": site_kwh,
+        "public_share": public_share,
+        "capture": capture,
+    }
