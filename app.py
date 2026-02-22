@@ -31,7 +31,7 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 
 
-st.set_page_config(page_title="Pallaoro EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
     """
@@ -62,7 +62,7 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Pallaoro EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
   <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
 </div>
 """,
@@ -209,7 +209,14 @@ if demand_mode.startswith("Ho dati"):
         else:
             df_raw = None
             if sample:
-                df_raw = pd.read_csv("sample_data/parking_sample.csv")
+                from pathlib import Path
+                sample_path = Path("sample_data/parking_sample.csv")
+                if sample_path.exists():
+                    df_raw = pd.read_csv(sample_path)
+                else:
+                    st.info("Esempio (sample_data) non disponibile su questo deploy. Carica un CSV oppure disattiva 'sample'.")
+                    df_raw = None
+                    sample = False
 
         if df_raw is not None:
             try:
@@ -230,7 +237,7 @@ if demand_mode.startswith("Ho dati"):
                 st.error(f"Errore parsing CSV: {e}")
 
     with c2:
-        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>La stima veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Lo stimatore veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
         vehicles_override = st.number_input(
             "Override veicoli/giorno (se conosci il dato)",
             min_value=0.0,
@@ -366,13 +373,14 @@ with sizing_tab:
     with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", expanded=False):
         c1, c2, c3 = st.columns(3)
         with c1:
-            start_sessions_day = st.number_input("Sessioni/giorno iniziali (auto che ricaricano)", min_value=0.0, value=float(dres.sessions_per_day), step=1.0)
-            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", 0, 100, int(share_sessions_dc*100), step=5) / 100.0
+            start_sessions_day = st.number_input("Sessioni/giorno iniziali (auto che ricaricano)",
+        key="sizing5_start_sessions", min_value=0.0, value=float(dres.sessions_per_day), step=1.0)
+            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", key="sizing5_share_dc", 0, 100, int(share_sessions_dc*100), step=5) / 100.0
         with c2:
-            growth_yoy_suggest = st.slider("Crescita annua domanda (%)", 0.0, 80.0, 35.0, step=1.0) / 100.0
-            years_suggest = st.selectbox("Orizzonte (anni)", [3, 4, 5, 6, 7, 10], index=2)
+            growth_yoy_suggest = st.slider("Crescita annua domanda (%)", key="sizing5_growth", 0.0, 80.0, 35.0, step=1.0) / 100.0
+            years_suggest = st.selectbox("Orizzonte (anni)", key="sizing5_years", [3, 4, 5, 6, 7, 10], index=2)
         with c3:
-            objective = st.selectbox("Obiettivo", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
+            objective = st.selectbox("Obiettivo", key="sizing5_objective", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
             capex_budget_chargers = float(max(capex_budget - grid_connection_capex - signage_capex, 0.0))
             st.caption(f"Budget colonnine (CAPEX max - costi sito): {num(capex_budget_chargers,0)} €")
 
@@ -449,6 +457,7 @@ with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", ex
     with c1:
         start_sessions_day = st.number_input(
             "Sessioni/giorno iniziali (auto che ricaricano)",
+        key="bc_start_sessions",
             min_value=0.0,
             value=float(getattr(dres, "sessions_per_day", 0.0)),
             step=1.0,
@@ -461,10 +470,10 @@ with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", ex
             step=5,
         ) / 100.0
     with c2:
-        growth_yoy_suggest = st.slider("Crescita annua domanda (%)", 0.0, 80.0, 35.0, step=1.0) / 100.0
-        years_suggest = st.selectbox("Orizzonte (anni)", [3, 4, 5, 6, 7, 10], index=2)
+        growth_yoy_suggest = st.slider("Crescita annua domanda (%)", key="sizing5_growth", 0.0, 80.0, 35.0, step=1.0) / 100.0
+        years_suggest = st.selectbox("Orizzonte (anni)", key="sizing5_years", [3, 4, 5, 6, 7, 10], index=2)
     with c3:
-        objective = st.selectbox("Obiettivo", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
+        objective = st.selectbox("Obiettivo", key="sizing5_objective", ["Massimizza NPV", "Massimizza NPV/Capex"], index=0)
         capex_budget_chargers = float(max(capex_budget - grid_connection_capex - signage_capex, 0.0))
         st.caption(f"Budget colonnine (CAPEX max - costi sito): {num(capex_budget_chargers,0)} €")
 
