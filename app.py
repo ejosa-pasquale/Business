@@ -699,12 +699,7 @@ with quick_tab:
         )
 
 st.markdown("#### Previsione domanda & ritorni (5 anni)")
-        q_growth_sessions = st.slider(
-            "Crescita annua domanda (%)",
-            0.0, 80.0,
-            35.0,
-            step=1.0,
-            key="quick_growth_sessions",
+        q_growth_sessions = st.slider("Crescita annua domanda (%)", 0.0, 80.0,35.0, step=1.0,  key="quick_growth_sessions",
         ) / 100.0
 
         horizon_years = 5
