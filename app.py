@@ -25,9 +25,30 @@ from optimizer_multi import TechCost, OptimizationInputs, optimize_mix_4tech
 from formatting import eur, pct, num
 
 
-def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: int, uptime: float, target_util: float) -> float:
-    """Energy throughput capacity at target utilization (kWh/year)."""
-    return float(n_chargers) * float(connectors_per_charger) * float(power_kw) * 8760.0 * float(uptime) * float(target_util)
+def kwh_capacity_year(
+    n_chargers: int,
+    power_kw: float,
+    connectors_per_charger: int,
+    uptime: float,
+    target_util: float,
+    hours_per_day: float = 24.0,
+) -> float:
+    """Energy throughput capacity at target utilization (kWh/year).
+
+    Notes
+    - `target_util` is interpreted as an average utilization of the *available operating window*.
+    - `hours_per_day` allows modeling night charging / restricted access windows.
+    """
+    hours_per_day = float(max(0.0, min(24.0, hours_per_day)))
+    return (
+        float(n_chargers)
+        * float(connectors_per_charger)
+        * float(power_kw)
+        * 365.0
+        * hours_per_day
+        * float(uptime)
+        * float(target_util)
+    )
 
 
 
@@ -511,14 +532,17 @@ with finance_tab:
         )
 
         # Capacità kWh/anno a target_util (anti-coda)
-        cap_kwh_year = (
-            kwh_capacity_year(n_ac, ac_power, ac_connectors, uptime, target_util)
-            + kwh_capacity_year(n_dc30, dc30_power, dc30_connectors, uptime, target_util)
-            + kwh_capacity_year(n_dc60, dc60_power, dc60_connectors, uptime, target_util)
-            + kwh_capacity_year(n_dc90, dc90_power, dc90_connectors, uptime, target_util)
+        # NB: "vendibili" = capacità teorica dell'infrastruttura, non i kWh effettivamente venduti.
+        capacity_kwh_year1 = (
+            kwh_capacity_year(n_ac, ac_power, ac_connectors, uptime, target_util, hours_per_day=hours_ac)
+            + kwh_capacity_year(n_dc30, dc30_power, dc30_connectors, uptime, target_util, hours_per_day=hours_dc)
+            + kwh_capacity_year(n_dc60, dc60_power, dc60_connectors, uptime, target_util, hours_per_day=hours_dc)
+            + kwh_capacity_year(n_dc90, dc90_power, dc90_connectors, uptime, target_util, hours_per_day=hours_dc)
         )
-        kwh_sold_year1_fin = float(min(demand_kwh_year1, cap_kwh_year))
-        lost_kwh_year1 = float(max(0.0, demand_kwh_year1 - cap_kwh_year))
+
+        # kWh effettivamente venduti: limitati da domanda e capacità
+        kwh_sold_year1 = float(min(demand_kwh_year1, capacity_kwh_year1))
+        lost_kwh_year1 = float(max(0.0, demand_kwh_year1 - capacity_kwh_year1))
 
         # --- Lato domanda (auto / sessioni) per rendere la stima "reale"
         # Nota: modello semplice: 1 sessione ~ 1 auto che ricarica.
@@ -548,12 +572,13 @@ with finance_tab:
         vehicles_per_day_val = float(getattr(dinp, "vehicles_per_day", 0.0)) if is_parking_mode else None
         bev_vehicles_day = (vehicles_per_day_val * float(bev_share)) if vehicles_per_day_val is not None else None
 
-        demand_vs_capacity = float(demand_kwh_year1) / max(float(cap_kwh_year), 1e-9)
+        demand_vs_capacity = float(demand_kwh_year1) / max(float(capacity_kwh_year1), 1e-9)
 
         st.metric("CAPEX totale", eur(capex))
         st.metric("OPEX fisso anno 1", eur(fixed_opex_year1))
         st.metric("Potenza installata", f"{num(installed_power_kw, 0)} kW")
-        st.metric("kWh vendibili (Year 1, a target_util)", num(kwh_sold_year1_fin, 0))
+        st.metric("kWh vendibili (Year 1, a target_util)", num(capacity_kwh_year1, 0))
+        st.metric("kWh venduti (Year 1)", num(kwh_sold_year1, 0))
 
         st.markdown("#### Domanda (Year 1)")
         d1, d2, d3, d4 = st.columns(4)
@@ -592,7 +617,7 @@ with finance_tab:
             capex_total=float(capex),
             price_sell_eur_per_kwh=float(blended_sell_price),
             price_buy_eur_per_kwh=float(buy_price),
-            kwh_sold_year1=float(kwh_sold_year1_fin),
+            kwh_sold_year1=float(kwh_sold_year1),
             kwh_growth_yoy=float(kwh_growth),
             fixed_opex_year1=float(fixed_opex_year1),
             fixed_opex_growth_yoy=float(overhead_growth),
