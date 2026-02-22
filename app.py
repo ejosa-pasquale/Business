@@ -62,8 +62,8 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
-  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
+  <h1>⚡ Pallaoro EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <p>Business Center.</p>
 </div>
 """,
     unsafe_allow_html=True,
