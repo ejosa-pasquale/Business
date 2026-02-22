@@ -33,6 +33,25 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 st.set_page_config(page_title="Pallaoro Group Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
+st.markdown("""
+<style>
+/* Titolo/label del metric */
+div[data-testid="stMetricLabel"] p {
+  font-size: 12px !important;
+}
+
+/* Valore grande del metric */
+div[data-testid="stMetricValue"] {
+  font-size: 22px !important;
+}
+
+/* (opzionale) delta del metric */
+div[data-testid="stMetricDelta"] {
+  font-size: 12px !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
 st.markdown(
     """
 <style>
