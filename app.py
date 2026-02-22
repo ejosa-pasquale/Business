@@ -31,7 +31,7 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 
 
-st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Pallaoro Group EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
     """
@@ -62,8 +62,8 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
-  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
+  <h1>⚡ Pallaoro Group EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <p>Business Y35 -eV Field Service</p>
 </div>
 """,
     unsafe_allow_html=True,
