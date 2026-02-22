@@ -198,6 +198,7 @@ if demand_mode.startswith("Ho dati"):
         st.markdown("**Carica un CSV con serie temporale** (timestamp + occupazione oppure posti liberi).")
         up = st.file_uploader("CSV parcheggio", type=["csv", "tsv"])
         sample = st.checkbox("Usa un esempio fittizio (sample_data)", value=(up is None))
+
         if up is not None:
             raw = up.read()
             df_raw = pd.read_csv(io.BytesIO(raw))
