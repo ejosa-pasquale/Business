@@ -15,6 +15,18 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+import datetime
+
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import cm
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.styles import getSampleStyleSheet
+except Exception:  # reportlab not installed
+    A4 = None
+
+
 from common import fetch_csv
 from parking_occupancy import parse_parking_csv, estimate_daily_arrivals
 from trento_chargers import summarize_chargers, DEFAULT_TRENTO_DATASET_PAGE
@@ -50,6 +62,88 @@ def kwh_capacity_year(
         * float(target_util)
     )
 
+
+
+
+def build_quick_roi_pdf_report(
+    site_name: str,
+    inputs: dict,
+    results: dict,
+    forecast_df: pd.DataFrame,
+) -> bytes:
+    """Build a simple PDF report for the Quick ROI screen."""
+    if A4 is None:
+        # Fallback: return a minimal text file as bytes
+        lines = []
+        lines.append(f"Quick ROI Report — {site_name}")
+        lines.append("")
+        lines.append("INPUTS")
+        for k, v in inputs.items():
+            lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("RESULTS")
+        for k, v in results.items():
+            lines.append(f"- {k}: {v}")
+        lines.append("")
+        lines.append("FORECAST (first rows)")
+        lines.append(forecast_df.head(10).to_csv(index=False))
+        return ("\n".join(lines)).encode("utf-8")
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=2*cm, rightMargin=2*cm, topMargin=1.5*cm, bottomMargin=1.5*cm)
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph(f"<b>Quick ROI Report</b> — {site_name}", styles["Title"]))
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("<b>Input principali</b>", styles["Heading2"]))
+    in_table = [["Parametro", "Valore"]] + [[str(k), str(v)] for k, v in inputs.items()]
+    t = Table(in_table, colWidths=[7*cm, 8*cm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    story.append(t)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("<b>Risultati</b>", styles["Heading2"]))
+    res_table = [["KPI", "Valore"]] + [[str(k), str(v)] for k, v in results.items()]
+    t2 = Table(res_table, colWidths=[7*cm, 8*cm])
+    t2.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+    ]))
+    story.append(t2)
+    story.append(Spacer(1, 12))
+
+    story.append(Paragraph("<b>Previsione 5 anni</b>", styles["Heading2"]))
+    cols = ["Anno", "Sessioni/giorno", "kWh richiesti", "kWh venduti", "Ricavi (€)", "EBITDA (€)"]
+    show = forecast_df.copy()
+    # ensure expected columns
+    for c in cols:
+        if c not in show.columns:
+            pass
+    data = [cols] + show[cols].values.tolist()
+    t3 = Table(data, colWidths=[1.4*cm, 2.4*cm, 2.6*cm, 2.6*cm, 2.7*cm, 2.7*cm])
+    t3.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.lightgrey),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.grey),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("FONTSIZE", (0,0), (-1,-1), 8),
+        ("VALIGN", (0,0), (-1,-1), "MIDDLE"),
+    ]))
+    story.append(t3)
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(f"Generato il {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", styles["Normal"]))
+
+    doc.build(story)
+    pdf = buf.getvalue()
+    buf.close()
+    return pdf
 
 
 st.set_page_config(page_title="Pallaoro Group Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
@@ -339,11 +433,374 @@ else:
 
 st.divider()
 
+"""Main Streamlit app.
+
+This repo is used by non-technical users. We therefore keep a "Quick ROI" screen
+with minimal inputs, on top of the full workflow tabs.
+"""
+
 # -----------------------
-# Tabs: Sizing, Finance, Strategy, Data
+# Tabs: Quick ROI, Sizing, Finance, Strategy, Data
 # -----------------------
 
-sizing_tab, finance_tab, strategy_tab, data_tab = st.tabs(["📐 Sizing", "💼 Business Case", "🧭 Strategia", "🗂️ Dati pubblici"])
+quick_tab, sizing_tab, finance_tab, strategy_tab, data_tab = st.tabs(
+    ["🚀 Quick ROI", "📐 Sizing", "💼 Business Case", "🧭 Strategia", "🗂️ Dati pubblici"]
+)
+
+
+with quick_tab:
+    st.markdown("### Quick ROI — input semplici → ritorno investimento")
+    st.caption(
+        "Schermata semplificata per utenti non tecnici. Inserisci auto che ricaricano, investimento e (opzionale) un mix AC/DC; il tool calcola domanda, capacità, kWh venduti e ritorno."
+    )
+
+    q1, q2 = st.columns([1.1, 0.9])
+
+    with q1:
+        st.markdown("#### 1) Domanda (semplice)")
+        q_sessions_day = st.number_input(
+            "Auto che ricaricano al giorno (≈ sessioni/giorno)",
+            min_value=0.0,
+            value=float(dres.sessions_per_day) if dres is not None else 10.0,
+            step=1.0,
+            key="quick_sessions_day",
+        )
+        q_share_dc = st.slider(
+            "Quota sessioni DC (%)",
+            min_value=0,
+            max_value=100,
+            value=int(share_sessions_dc * 100),
+            step=5,
+            key="quick_share_dc",
+        ) / 100.0
+
+        q_kwh_req_year1 = (
+            (q_sessions_day * (1 - q_share_dc) * float(kwh_per_session_ac)
+             + q_sessions_day * q_share_dc * float(kwh_per_session_dc))
+            * 365.0
+        )
+
+        st.metric("kWh richiesti (Year 1)", num(q_kwh_req_year1, 0))
+
+        st.markdown("#### 2) Infrastruttura (semplice)")
+        st.caption("Modifica leggermente il mix per vedere l'impatto su capacità e ROI.")
+
+        qa, qb, qc, qd = st.columns(4)
+        with qa:
+            q_n_ac = st.number_input("AC22", min_value=0, value=4, step=1, key="quick_n_ac")
+        with qb:
+            q_n_dc30 = st.number_input("DC30", min_value=0, value=0, step=1, key="quick_n_dc30")
+        with qc:
+            q_n_dc60 = st.number_input("DC60", min_value=0, value=2, step=1, key="quick_n_dc60")
+        with qd:
+            q_n_dc90 = st.number_input("DC90", min_value=0, value=0, step=1, key="quick_n_dc90")
+
+        # CAPEX calcolato (colonnine + costi sito)
+        q_capex_calc = (
+            q_n_ac * (float(ac_hw) + float(ac_install))
+            + q_n_dc30 * (float(dc30_hw) + float(dc30_install))
+            + q_n_dc60 * (float(dc60_hw) + float(dc60_install))
+            + q_n_dc90 * (float(dc90_hw) + float(dc90_install))
+            + float(grid_connection_capex)
+            + float(signage_capex)
+        )
+
+        q_use_calc_capex = st.checkbox(
+            "Usa CAPEX calcolato dal mix (altrimenti inserisco io l'investimento)",
+            value=True,
+            key="quick_use_calc_capex",
+        )
+        q_capex_input = st.number_input(
+            "Investimento totale (CAPEX) (€)",
+            min_value=0.0,
+            value=float(q_capex_calc),
+            step=5_000.0,
+            key="quick_capex_input",
+        )
+        q_capex_total = float(q_capex_calc) if q_use_calc_capex else float(q_capex_input)
+
+    with q2:
+        st.markdown("#### 3) Risultati")
+
+        # Capacity (supply) at target utilization
+        q_cap_ac = kwh_capacity_year(
+            n_chargers=int(q_n_ac),
+            power_kw=float(ac_power),
+            connectors_per_charger=int(ac_connectors),
+            uptime=float(uptime),
+            target_util=float(target_util),
+            hours_per_day=float(hours_ac),
+        )
+        q_cap_dc = (
+            kwh_capacity_year(int(q_n_dc30), float(dc30_power), int(dc30_connectors), float(uptime), float(target_util), float(hours_dc))
+            + kwh_capacity_year(int(q_n_dc60), float(dc60_power), int(dc60_connectors), float(uptime), float(target_util), float(hours_dc))
+            + kwh_capacity_year(int(q_n_dc90), float(dc90_power), int(dc90_connectors), float(uptime), float(target_util), float(hours_dc))
+        )
+        q_kwh_sellable = float(q_cap_ac + q_cap_dc)
+        q_kwh_sold = float(min(q_kwh_req_year1, q_kwh_sellable))
+        q_kwh_lost = float(max(0.0, q_kwh_req_year1 - q_kwh_sellable))
+
+        # Blended sell price based on AC/DC split of *demand* (not limited by capacity)
+        q_kwh_ac_req = float(q_sessions_day) * (1 - float(q_share_dc)) * float(kwh_per_session_ac) * 365.0
+        q_kwh_dc_req = float(q_sessions_day) * float(q_share_dc) * float(kwh_per_session_dc) * 365.0
+        q_tot_req = max(q_kwh_ac_req + q_kwh_dc_req, 1e-9)
+        q_sell_price_blended = (
+            float(sell_price_ac) * q_kwh_ac_req + float(sell_price_dc) * q_kwh_dc_req
+        ) / q_tot_req
+
+        # Fixed OPEX (site + per charger fixed)
+        q_fixed_opex = (
+            float(overhead_opex)
+            + int(q_n_ac) * (float(ac_opex_year) + float(ac_mnt) + float(ac_backend))
+            + int(q_n_dc30) * (float(dc30_opex_year) + float(dc30_mnt) + float(dc30_backend))
+            + int(q_n_dc60) * (float(dc60_opex_year) + float(dc60_mnt) + float(dc60_backend))
+            + int(q_n_dc90) * (float(dc90_opex_year) + float(dc90_mnt) + float(dc90_backend))
+        )
+
+        fin_quick = FinanceInputs(
+            years=int(years),
+            discount_rate=float(discount_rate),
+            capex_total=float(q_capex_total),
+            price_sell_eur_per_kwh=float(q_sell_price_blended),
+            price_buy_eur_per_kwh=float(buy_price),
+            kwh_sold_year1=float(q_kwh_sold),
+            kwh_growth_yoy=float(kwh_growth),
+            fixed_opex_year1=float(q_fixed_opex),
+            fixed_opex_growth_yoy=float(overhead_growth),
+            variable_opex_per_kwh=float(variable_fee),
+        )
+        fres, _ = evaluate_finance(fin_quick)
+
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("CAPEX", eur(q_capex_total))
+        r2.metric("kWh vendibili (Year 1)", num(q_kwh_sellable, 0))
+        r3.metric("kWh venduti (Year 1)", num(q_kwh_sold, 0))
+        r4.metric("kWh persi", num(q_kwh_lost, 0))
+
+        st.markdown("##### Risultati finanziari")
+        f1, f2, f3, f4 = st.columns(4)
+        f1.metric("NPV", eur(fres.npv))
+        f2.metric("IRR", pct(fres.irr))
+        f3.metric("Payback (anni, scontato)", num(fres.payback_year, 1))
+        f4.metric("EBITDA anno 1", eur(fres.ebitda_year1))
+
+        if q_kwh_lost > 0:
+            st.warning(
+                "Domanda > capacità: una parte della domanda non viene servita. Aumenta colonnine, ore operative o target utilizzo."
+            )
+        
+        # -----------------------
+        # Executive summary (cliente)
+        # -----------------------
+        st.markdown("#### Sintesi (cliente)")
+
+        # 1) Semaforo capacità
+        if q_kwh_req_year1 <= 0:
+            st.info("Inserisci una domanda > 0 per valutare capacità e ritorni.")
+        else:
+            sat_ratio = q_kwh_sellable / max(q_kwh_req_year1, 1e-9)
+            if sat_ratio >= 1.0:
+                st.success(f"✅ Capacità sufficiente — puoi servire ~{sat_ratio*100:.0f}% della domanda (Year 1).")
+            elif sat_ratio >= 0.9:
+                st.warning(f"⚠️ Quasi saturo — puoi servire ~{sat_ratio*100:.0f}% della domanda (Year 1).")
+            else:
+                st.error(f"⛔ Capacità insufficiente — puoi servire ~{sat_ratio*100:.0f}% della domanda (Year 1).")
+
+        # Suggerimento rapido di upgrade se saturi (euristica)
+        if q_kwh_lost > 0:
+            gap = q_kwh_lost
+            # capacità marginale annua per +1 colonnina, a target util
+            marg = {
+                "AC22": kwh_capacity_year(1, float(ac_power), int(ac_connectors), float(uptime), float(target_util), float(hours_ac)),
+                "DC30": kwh_capacity_year(1, float(dc30_power), int(dc30_connectors), float(uptime), float(target_util), float(hours_dc)),
+                "DC60": kwh_capacity_year(1, float(dc60_power), int(dc60_connectors), float(uptime), float(target_util), float(hours_dc)),
+                "DC90": kwh_capacity_year(1, float(dc90_power), int(dc90_connectors), float(uptime), float(target_util), float(hours_dc)),
+            }
+            capex_marg = {
+                "AC22": float(ac_hw) + float(ac_install),
+                "DC30": float(dc30_hw) + float(dc30_install),
+                "DC60": float(dc60_hw) + float(dc60_install),
+                "DC90": float(dc90_hw) + float(dc90_install),
+            }
+            # costo per kWh di capacità aggiunta (semplificato)
+            best = None
+            for tech, add_kwh in marg.items():
+                if add_kwh <= 0:
+                    continue
+                cpk = capex_marg[tech] / add_kwh
+                if best is None or cpk < best[1]:
+                    best = (tech, cpk, add_kwh)
+            if best is not None:
+                tech, _, add_kwh = best
+                n_need = int(np.ceil(gap / add_kwh))
+                st.info(
+                    f"Suggerimento rapido: aggiungi **{n_need}× {tech}** per coprire ~{num(gap,0)} kWh/anno di gap (a target utilizzo)."
+                )
+
+        # 2) Scenario rapido (sensibilità domanda ±20%)
+        st.markdown("##### Scenario rapido (sensibilità domanda)")
+        def _finance_for_demand_multiplier(mult: float):
+            d = float(q_kwh_req_year1) * float(mult)
+            sold = float(min(d, q_kwh_sellable))
+            fin = FinanceInputs(
+                years=int(years),
+                discount_rate=float(discount_rate),
+                capex_total=float(q_capex_total),
+                price_sell_eur_per_kwh=float(q_sell_price_blended),
+                price_buy_eur_per_kwh=float(buy_price),
+                kwh_sold_year1=float(sold),
+                kwh_growth_yoy=float(kwh_growth),
+                fixed_opex_year1=float(q_fixed_opex),
+                fixed_opex_growth_yoy=float(overhead_growth),
+                variable_opex_per_kwh=float(variable_fee),
+            )
+            r, _ = evaluate_finance(fin)
+            return sold, r
+
+        s_base_sold, s_base = _finance_for_demand_multiplier(1.0)
+        s_low_sold, s_low = _finance_for_demand_multiplier(0.8)
+        s_high_sold, s_high = _finance_for_demand_multiplier(1.2)
+
+        s1, s2, s3 = st.columns(3)
+        with s1:
+            st.markdown("**-20% domanda**")
+            st.metric("kWh venduti (Y1)", num(s_low_sold, 0))
+            st.metric("NPV", eur(s_low.npv))
+            st.metric("Payback", num(s_low.payback_year, 1))
+        with s2:
+            st.markdown("**Base**")
+            st.metric("kWh venduti (Y1)", num(s_base_sold, 0))
+            st.metric("NPV", eur(s_base.npv))
+            st.metric("Payback", num(s_base.payback_year, 1))
+        with s3:
+            st.markdown("**+20% domanda**")
+            st.metric("kWh venduti (Y1)", num(s_high_sold, 0))
+            st.metric("NPV", eur(s_high.npv))
+            st.metric("Payback", num(s_high.payback_year, 1))
+
+        # 3) Assunzioni chiave (una riga)
+        st.caption(
+            "Assunzioni chiave: "
+            f"Prezzo AC/DC {float(sell_price_ac):.2f}/{float(sell_price_dc):.2f} €/kWh · "
+            f"Costo energia {float(buy_price):.2f} €/kWh · "
+            f"Fee variabile {float(variable_fee):.2f} €/kWh · "
+            f"Ore operative AC/DC {float(hours_ac):.0f}/{float(hours_dc):.0f}h · "
+            f"Target utilizzo {float(target_util)*100:.0f}% · Uptime {float(uptime)*100:.0f}% · "
+            f"kWh/sessione AC/DC {float(kwh_per_session_ac):.0f}/{float(kwh_per_session_dc):.0f}"
+        )
+
+        # 4) Output “riassunto proposta”
+        st.markdown("##### Proposta (riassunto)")
+        st.info(
+            f"Installare **{int(q_n_ac)}× AC22**, **{int(q_n_dc30)}× DC30**, **{int(q_n_dc60)}× DC60**, **{int(q_n_dc90)}× DC90** "
+            f"con **CAPEX {eur(q_capex_total)}**. "
+            f"Nel primo anno: **{num(q_kwh_sold,0)} kWh venduti**, **EBITDA {eur(fres.ebitda_year1)}**, "
+            f"**Payback {num(fres.payback_year,1)} anni**, **NPV {eur(fres.npv)}**."
+        )
+
+st.markdown("#### Previsione domanda & ritorni (5 anni)")
+        q_growth_sessions = st.slider(
+            "Crescita annua domanda (%)",
+            0.0, 80.0,
+            35.0,
+            step=1.0,
+            key="quick_growth_sessions",
+        ) / 100.0
+
+        horizon_years = 5
+
+        # Demand forecast (sessions/day and kWh requested) grows YoY; capacity stays constant
+        rows = []
+        for y in range(1, horizon_years + 1):
+            sessions_day_y = float(q_sessions_day) * ((1 + q_growth_sessions) ** (y - 1))
+            kwh_req_y = (
+                (sessions_day_y * (1 - q_share_dc) * float(kwh_per_session_ac)
+                 + sessions_day_y * q_share_dc * float(kwh_per_session_dc))
+                * 365.0
+            )
+            kwh_sold_y = min(kwh_req_y, q_kwh_sellable)
+            revenue_y = kwh_sold_y * float(q_sell_price_blended)
+            energy_cost_y = kwh_sold_y * float(buy_price)
+            var_cost_y = kwh_sold_y * float(variable_fee)
+
+            fixed_y = float(q_fixed_opex) * ((1 + float(overhead_growth)) ** (y - 1))
+            ebitda_y = revenue_y - energy_cost_y - var_cost_y - fixed_y
+
+            rows.append({
+                "Anno": y,
+                "Sessioni/giorno": sessions_day_y,
+                "kWh richiesti": kwh_req_y,
+                "kWh venduti": kwh_sold_y,
+                "Ricavi (€)": revenue_y,
+                "EBITDA (€)": ebitda_y,
+            })
+
+        forecast_df = pd.DataFrame(rows)
+        # Pretty rounding for display + PDF table
+        forecast_df_disp = forecast_df.copy()
+        forecast_df_disp["Sessioni/giorno"] = forecast_df_disp["Sessioni/giorno"].round(1)
+        for c in ["kWh richiesti", "kWh venduti", "Ricavi (€)", "EBITDA (€)"]:
+            forecast_df_disp[c] = forecast_df_disp[c].round(0).astype(int)
+
+        cA, cB = st.columns([1.0, 1.0])
+        with cA:
+            fig = px.line(forecast_df, x="Anno", y="Sessioni/giorno", markers=True, title="Previsione auto in ricarica (sessioni/giorno)")
+            st.plotly_chart(fig, use_container_width=True)
+
+        with cB:
+            fig2 = px.line(
+                forecast_df,
+                x="Anno",
+                y=["Ricavi (€)", "EBITDA (€)"],
+                markers=True,
+                title="Ricavi ed EBITDA (5 anni) — limitati dalla capacità",
+            )
+            st.plotly_chart(fig2, use_container_width=True)
+
+        st.dataframe(
+            forecast_df_disp,
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        st.markdown("#### Scarica report")
+        st.caption("Report PDF con input + KPI + tabella di previsione 5 anni (utile per condivisione con cliente).")
+        report_inputs = {
+            "Sito": site_name,
+            "Sessioni/giorno (Y1)": f"{q_sessions_day:.1f}",
+            "Quota DC": f"{q_share_dc*100:.0f}%",
+            "Crescita annua domanda": f"{q_growth_sessions*100:.0f}%",
+            "Mix (AC22/DC30/DC60/DC90)": f"{q_n_ac}/{q_n_dc30}/{q_n_dc60}/{q_n_dc90}",
+            "Ore operative AC / DC": f"{float(hours_ac):.0f}h / {float(hours_dc):.0f}h",
+            "CAPEX totale": eur(q_capex_total),
+            "Prezzo AC / DC": f"{float(sell_price_ac):.2f} / {float(sell_price_dc):.2f} €/kWh",
+        }
+        report_results = {
+            "kWh richiesti (Y1)": num(q_kwh_req_year1, 0),
+            "kWh vendibili (Y1)": num(q_kwh_sellable, 0),
+            "kWh venduti (Y1)": num(q_kwh_sold, 0),
+            "NPV": eur(fres.npv),
+            "IRR": pct(fres.irr),
+            "Payback (anni, scontato)": num(fres.payback_year, 1),
+            "EBITDA anno 1": eur(fres.ebitda_year1),
+        }
+        pdf_bytes = build_quick_roi_pdf_report(site_name, report_inputs, report_results, forecast_df_disp)
+        st.download_button(
+            "⬇️ Scarica report (PDF)",
+            data=pdf_bytes,
+            file_name=f"QuickROI_{site_name.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            key="quick_download_pdf",
+        )
+
+
+        # Payback in sessions (very simple)
+        margin_per_kwh = max(float(q_sell_price_blended) - float(buy_price) - float(variable_fee), 0.0)
+        blended_kwh_per_session = (1 - q_share_dc) * float(kwh_per_session_ac) + q_share_dc * float(kwh_per_session_dc)
+        margin_per_session = margin_per_kwh * max(blended_kwh_per_session, 1e-6)
+        if margin_per_session > 0:
+            sessions_to_payback = float(q_capex_total) / margin_per_session
+            st.caption(f"Sessioni stimate per ripagare il CAPEX (semplificato): **{num(sessions_to_payback,0)}**")
 
 with sizing_tab:
     st.markdown("### 2) Sizing — quante colonnine servono?")
@@ -393,7 +850,6 @@ with sizing_tab:
         st.metric("Connettori richiesti", sres_dc.required_connectors)
         st.metric("Colonnine richieste", sres_dc.required_chargers)
         st.metric("Utilizzo richiesto (energy-based)", pct(sres_dc.achieved_utilization))
-        st.metric("Utilizzo richiesto (energy-based)", pct(sres_dc.achieved_utilization))
 
     st.markdown("#### Sintesi domanda")
     k1, k2, k3, k4 = st.columns(4)
@@ -413,9 +869,24 @@ with sizing_tab:
     with st.expander("Suggerisci configurazione da sessioni iniziali + crescita", expanded=False):
         c1, c2, c3 = st.columns(3)
         with c1:
-            start_sessions_day = st.number_input("Sessioni/giorno iniziali (auto che ricaricano)",
-        key="sizing5_start_sessions", min_value=0.0, value=float(dres.sessions_per_day), step=1.0)
-            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", 0, 100, int(share_sessions_dc*100), step=5, key="sizing5_share_dc") / 100.0
+            start_sessions_day = st.number_input(
+                "Sessioni/giorno iniziali (auto che ricaricano)",
+                min_value=0.0,
+                value=float(dres.sessions_per_day),
+                step=1.0,
+                key="sizing5_start_sessions",
+            )
+            share_dc_for_suggest = (
+                st.slider(
+                    "Quota sessioni DC (%)",
+                    0,
+                    100,
+                    int(share_sessions_dc * 100),
+                    step=5,
+                    key="sizing5_share_dc",
+                )
+                / 100.0
+            )
         with c2:
             growth_yoy_suggest = st.slider("Crescita annua domanda (%)", 0.0, 80.0, 35.0, step=1.0, key="sizing5_growth") / 100.0
             years_suggest = st.selectbox("Orizzonte (anni)", [3, 4, 5, 6, 7, 10], index=2, key="sizing5_years")
