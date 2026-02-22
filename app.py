@@ -31,7 +31,7 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 
 
-st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Pallaoro EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
     """
@@ -62,7 +62,7 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <h1>⚡ Pallaoro EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
   <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
 </div>
 """,
@@ -230,7 +230,7 @@ if demand_mode.startswith("Ho dati"):
                 st.error(f"Errore parsing CSV: {e}")
 
     with c2:
-        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Lo stimatore veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>La stima veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
         vehicles_override = st.number_input(
             "Override veicoli/giorno (se conosci il dato)",
             min_value=0.0,
