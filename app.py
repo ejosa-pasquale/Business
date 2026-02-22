@@ -31,7 +31,7 @@ def kwh_capacity_year(n_chargers: int, power_kw: float, connectors_per_charger: 
 
 
 
-st.set_page_config(page_title="Trento EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Pallaoro Group Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown(
     """
@@ -62,7 +62,7 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Trento EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <h1>⚡ Pallaoro Group EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
   <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
 </div>
 """,
@@ -134,8 +134,8 @@ with st.sidebar:
     with st.expander("DC 30 kW (per colonnina)", expanded=True):
         dc30_power = st.number_input("Potenza nominale DC30 (kW)", min_value=20.0, value=30.0, step=5.0)
         dc30_connectors = st.number_input("Connettori per colonnina DC30", min_value=1, value=1, step=1)
-        dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=22_000.0, step=1_000.0)
-        dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=12_000.0, step=1_000.0)
+        dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=7_000.0, step=1_000.0)
+        dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=5_000.0, step=1_000.0)
         dc30_opex_year = st.number_input("OPEX fisso DC30 (€/anno per colonnina)", min_value=0.0, value=600.0, step=50.0)
         dc30_mnt = st.number_input("Manutenzione annua DC30 (€/a)", min_value=0.0, value=900.0, step=50.0)
         dc30_backend = st.number_input("Backend/CSMS annuo per colonnina DC30 (€/a)", min_value=0.0, value=420.0, step=20.0)
@@ -143,8 +143,8 @@ with st.sidebar:
     with st.expander("DC 60 kW (per colonnina)", expanded=True):
         dc60_power = st.number_input("Potenza nominale DC60 (kW)", min_value=40.0, value=60.0, step=5.0)
         dc60_connectors = st.number_input("Connettori per colonnina DC60", min_value=1, value=2, step=1)
-        dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=35_000.0, step=1_000.0)
-        dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=16_000.0, step=1_000.0)
+        dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=20_000.0, step=1_000.0)
+        dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=5_000.0, step=1_000.0)
         dc60_opex_year = st.number_input("OPEX fisso DC60 (€/anno per colonnina)", min_value=0.0, value=700.0, step=50.0)
         dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=1_100.0, step=50.0)
         dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=420.0, step=20.0)
@@ -152,8 +152,8 @@ with st.sidebar:
     with st.expander("DC 90 kW (per colonnina)", expanded=True):
         dc90_power = st.number_input("Potenza nominale DC90 (kW)", min_value=60.0, value=90.0, step=5.0)
         dc90_connectors = st.number_input("Connettori per colonnina DC90", min_value=1, value=2, step=1)
-        dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=45_000.0, step=1_000.0)
-        dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=18_000.0, step=1_000.0)
+        dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=35_000.0, step=1_000.0)
+        dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=8_000.0, step=1_000.0)
         dc90_opex_year = st.number_input("OPEX fisso DC90 (€/anno per colonnina)", min_value=0.0, value=800.0, step=50.0)
         dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=1_250.0, step=50.0)
         dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=420.0, step=20.0)
@@ -162,7 +162,7 @@ with st.sidebar:
     grid_connection_capex = st.number_input(
         "Connessione rete / upgrade / scavi (CAPEX extra)",
         min_value=0.0,
-        value=30_000.0,
+        value=0.0,
         step=5_000.0,
         help="Inserisci una stima unica (MVP). In v1 puoi passare a range + Monte Carlo.",
     )
@@ -172,7 +172,7 @@ with st.sidebar:
     overhead_opex = st.number_input(
         "Overhead annuo (assicurazioni, pulizia, call center, affitto/royalty)",
         min_value=0.0,
-        value=9_000.0,
+        value=6_000.0,
         step=500.0,
     )
     overhead_growth = st.slider("Crescita OPEX fissi YoY (%)", 0.0, 10.0, 2.0, step=0.5) / 100.0
@@ -237,7 +237,7 @@ if demand_mode.startswith("Ho dati"):
                 st.error(f"Errore parsing CSV: {e}")
 
     with c2:
-        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Lo stimatore veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
+        st.markdown("<div class='card'><b>Nota</b><br><span class='muted'>Il calcolo veicoli/giorno è semplice: (occupazione media × 24) / sosta media. Se hai dati di ingressi reali, puoi inserirli direttamente sotto.</span></div>", unsafe_allow_html=True)
         vehicles_override = st.number_input(
             "Override veicoli/giorno (se conosci il dato)",
             min_value=0.0,
