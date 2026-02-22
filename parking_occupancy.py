@@ -1,79 +1,69 @@
+# parking_occupancy.py - flat layout
 from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Optional, Literal
 
 import pandas as pd
 
 
-@dataclass
-class ParkingSeries:
-    df: pd.DataFrame
-    time_col: str
-    metric_col: str
-    metric_kind: Literal["occupancy", "free_spots"]
+def estimate_daily_traffic_from_parking(
+    parking_df: pd.DataFrame,
+    total_stalls: int,
+    avg_dwell_h: float,
+) -> float:
+    '''
+    Estimate daily vehicle entries ("traffic") from parking occupancy time series.
 
+    Expected parking_df columns (from common.parse_parking_csv):
+      - timestamp: datetime
+      - value: numeric
+      - metric_type: 'occupancy' or 'free'
 
-def parse_parking_csv(df: pd.DataFrame) -> ParkingSeries:
-    """Attempt to parse a parking time series.
+    Logic (robust, MVP):
+      1) Convert to estimated occupied stalls over time.
+      2) Compute average occupied stalls during the day.
+      3) Estimate daily vehicle count ≈ (avg_occupied_stalls * 24) / avg_dwell_h
 
-    Expected columns (any of these):
-      - time: timestamp, datetime, date, ora
-      - metric: occupancy, occupazione, occupied, posti_occupati, free, liberi
+    Notes:
+      - If metric_type == 'free', occupied = total_stalls - free
+      - If occupancy looks like a ratio (0..1) or percent (0..100), convert to stalls.
+      - Clamp to [0, total_stalls].
+    '''
+    if parking_df is None or parking_df.empty:
+        raise ValueError("parking_df vuoto")
+    if total_stalls <= 0:
+        raise ValueError("total_stalls deve essere > 0")
+    if avg_dwell_h <= 0:
+        raise ValueError("avg_dwell_h deve essere > 0")
 
-    Returns normalized dataframe with columns: ts, value
-    """
-    cols = {c.lower(): c for c in df.columns}
-    time_candidates = [
-        k for k in cols
-        if any(x in k for x in ["timestamp", "datetime", "data", "date", "ora", "time", "ts"]) 
-    ]
-    if not time_candidates:
-        raise ValueError("Nessuna colonna tempo trovata. Attese: timestamp/datetime/data/ora")
+    df = parking_df.copy()
+    if "timestamp" not in df.columns or "value" not in df.columns or "metric_type" not in df.columns:
+        raise ValueError("parking_df non ha le colonne attese: timestamp, value, metric_type")
 
-    time_col = cols[time_candidates[0]]
+    metric_type = str(df["metric_type"].iloc[0]).lower()
 
-    metric_candidates_occ = [k for k in cols if any(x in k for x in ["occup", "occupied", "posti_occupati"]) ]
-    metric_candidates_free = [k for k in cols if any(x in k for x in ["free", "liber", "posti_liberi"]) ]
+    series = pd.to_numeric(df["value"], errors="coerce").dropna()
+    if series.empty:
+        raise ValueError("Nessun valore numerico valido in parking_df")
 
-    if metric_candidates_occ:
-        metric_col = cols[metric_candidates_occ[0]]
-        kind = "occupancy"
-    elif metric_candidates_free:
-        metric_col = cols[metric_candidates_free[0]]
-        kind = "free_spots"
+    # Convert to occupied stalls time series
+    v = pd.to_numeric(df["value"], errors="coerce")
+
+    if metric_type == "free":
+        occupied = total_stalls - v
     else:
-        raise ValueError("Nessuna colonna metrica trovata. Attese: occupazione/occupied o liberi/free")
+        # occupancy: could be stalls, ratio, or percent
+        # Heuristic: if max <= 1.2 -> ratio; if max <= 120 -> percent; else stalls
+        vmax = float(pd.to_numeric(v, errors="coerce").max())
+        if vmax <= 1.2:
+            occupied = v * total_stalls
+        elif vmax <= 120:
+            occupied = (v / 100.0) * total_stalls
+        else:
+            occupied = v
 
-    out = df[[time_col, metric_col]].copy()
-    out.columns = ["ts", "value"]
-    out["ts"] = pd.to_datetime(out["ts"], errors="coerce", utc=False)
-    out = out.dropna(subset=["ts"]).sort_values("ts")
-    out["value"] = pd.to_numeric(out["value"], errors="coerce")
-    out = out.dropna(subset=["value"])  # drop non numeric
+    occupied = occupied.clip(lower=0, upper=total_stalls)
 
-    return ParkingSeries(df=out, time_col=time_col, metric_col=metric_col, metric_kind=kind)
+    avg_occupied = float(occupied.mean(skipna=True))
+    daily_traffic = (avg_occupied * 24.0) / float(avg_dwell_h)
 
-
-def estimate_daily_arrivals(
-    series: ParkingSeries,
-    total_spots: int,
-    avg_stay_hours: float,
-) -> pd.DataFrame:
-    """Estimate arrivals/day from occupancy time series.
-
-    Very simple estimator:
-      vehicles_per_day ≈ (avg_occupied_spots * 24) / avg_stay_hours
-
-    If series is free_spots, occupancy = total_spots - free.
-    """
-    df = series.df.copy()
-    if series.metric_kind == "free_spots":
-        df["occ"] = total_spots - df["value"]
-    else:
-        df["occ"] = df["value"]
-
-    df["date"] = df["ts"].dt.date
-    g = df.groupby("date")["occ"].mean().reset_index()
-    g["vehicles_per_day"] = (g["occ"] * 24.0) / max(avg_stay_hours, 0.25)
-    return g
+    # Guardrail: at least 0
+    return max(0.0, daily_traffic)
