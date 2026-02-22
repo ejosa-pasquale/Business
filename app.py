@@ -698,8 +698,14 @@ with quick_tab:
             f"**Payback {num(fres.payback_year,1)} anni**, **NPV {eur(fres.npv)}**."
         )
 
-st.markdown("#### Previsione domanda & ritorni (5 anni)")
-        q_growth_sessions = st.slider("Crescita annua domanda (%)", 0.0, 80.0,35.0, step=1.0,  key="quick_growth_sessions",) / 100.0
+        st.markdown("#### Previsione domanda & ritorni (5 anni)")
+        q_growth_sessions = st.slider(
+            "Crescita annua domanda (%)",
+            0.0, 80.0,
+            35.0,
+            step=1.0,
+            key="quick_growth_sessions",
+        ) / 100.0
 
         horizon_years = 5
 
