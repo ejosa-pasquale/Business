@@ -68,7 +68,7 @@ class OptimizationResult:
 def _annual_capacity_kwh(n: int, tech: TechCost, uptime: float, util: float) -> float:
     # Connector-level energy capacity
     connectors = max(int(tech.connectors), 1)
-    return float(n) * connectors * float(tech.power_kw) * 24.0 * float(uptime) * float(util) * 365.0
+    return float(n) * connectors * float(tech.power_kw) * float(tech.hours_per_day) * float(uptime) * float(util) * 365.0
 
 
 def optimize_mix_4tech(

@@ -105,9 +105,12 @@ with st.sidebar:
     st.subheader("🛠️ Affidabilità & saturazione")
     uptime = st.slider("Uptime tecnico (%)", 85, 100, 97) / 100.0
     target_util = st.slider("Target utilizzo medio (anti-coda) (%)", 10, 90, 40) / 100.0
+    hours_ac = st.number_input("Ore operative/giorno per colonnina AC", min_value=1.0, max_value=24.0, value=24.0, step=1.0)
+    hours_dc = st.number_input("Ore operative/giorno per colonnina DC", min_value=1.0, max_value=24.0, value=24.0, step=1.0)
 
     st.subheader("💶 Prezzi & costi")
-    sell_price = st.number_input("Prezzo vendita (€/kWh)", min_value=0.20, value=0.65, step=0.01, format="%.2f")
+    sell_price_ac = st.number_input("Prezzo vendita AC (€/kWh)", min_value=0.20, value=0.55, step=0.01, format="%.2f")
+    sell_price_dc = st.number_input("Prezzo vendita DC (€/kWh)", min_value=0.20, value=0.75, step=0.01, format="%.2f")
     buy_price = st.number_input("Costo energia (€/kWh)", min_value=0.05, value=0.28, step=0.01, format="%.2f")
     variable_fee = st.number_input("OPEX variabile extra (€/kWh) — roaming/acquiring", min_value=0.0, value=0.03, step=0.01, format="%.2f")
 
@@ -465,11 +468,17 @@ with finance_tab:
     with right:
         st.markdown("#### Risultati finanziari")
 
+        # Prezzo medio (blended) in base al mix domanda AC/DC (Year 1)
+        kwh_ac_year1_dem = float(sessions_ac_day) * float(kwh_per_session_ac) * 365.0
+        kwh_dc_year1_dem = float(sessions_dc_day) * float(kwh_per_session_dc) * 365.0
+        tot_kwh_dem = max(kwh_ac_year1_dem + kwh_dc_year1_dem, 1e-9)
+        blended_sell_price = (float(sell_price_ac) * kwh_ac_year1_dem + float(sell_price_dc) * kwh_dc_year1_dem) / tot_kwh_dem
+
         fin_inp = FinanceInputs(
             years=int(years),
             discount_rate=float(discount_rate),
             capex_total=float(capex),
-            price_sell_eur_per_kwh=float(sell_price),
+            price_sell_eur_per_kwh=float(blended_sell_price),
             price_buy_eur_per_kwh=float(buy_price),
             kwh_sold_year1=float(kwh_sold_year1_fin),
             kwh_growth_yoy=float(kwh_growth),
@@ -485,6 +494,34 @@ with finance_tab:
         m2.metric("IRR", pct(fin_res.irr) if np.isfinite(fin_res.irr) else "n/a")
         m3.metric("Payback (anni, scontato)", "∞" if not np.isfinite(fin_res.payback_year) else num(fin_res.payback_year, 1))
         m4.metric("EBITDA anno 1", eur(fin_res.ebitda_year1))
+
+        st.markdown("#### Payback visto come sessioni")
+        # Margine per sessione (AC/DC) e numero di sessioni necessarie per ripagare il CAPEX
+        margin_per_kwh_ac = float(sell_price_ac) - float(buy_price) - float(variable_fee)
+        margin_per_kwh_dc = float(sell_price_dc) - float(buy_price) - float(variable_fee)
+        margin_per_session_ac = margin_per_kwh_ac * float(kwh_per_session_ac)
+        margin_per_session_dc = margin_per_kwh_dc * float(kwh_per_session_dc)
+
+        sess_total_day = max(float(sessions_ac_day) + float(sessions_dc_day), 0.0)
+        if sess_total_day > 1e-9:
+            share_dc_sess = float(sessions_dc_day) / sess_total_day
+        else:
+            share_dc_sess = float(share_sessions_dc) if 'share_sessions_dc' in locals() else 0.0
+
+        blended_margin_per_session = (1.0 - share_dc_sess) * margin_per_session_ac + share_dc_sess * margin_per_session_dc
+
+        if blended_margin_per_session <= 0:
+            st.warning("Con i prezzi/costi attuali il margine per sessione è <= 0: il payback in sessioni non è definito.")
+        else:
+            sessions_needed = float(capex) / blended_margin_per_session
+            st.metric("Sessioni necessarie (stima)", num(sessions_needed, 0))
+
+            # Curva payback (anni) al variare delle sessioni/giorno
+            x = np.linspace(1.0, max(5.0, sess_total_day * 3.0, 100.0), 100)
+            y = float(capex) / (blended_margin_per_session * x * 365.0)
+            df_pb = pd.DataFrame({"sessioni_giorno": x, "payback_anni": y})
+            fig_pb = px.line(df_pb, x="sessioni_giorno", y="payback_anni", title="Payback (anni) vs sessioni/giorno")
+            st.plotly_chart(fig_pb, use_container_width=True)
 
         df_cf = pd.DataFrame({
             "year": list(range(0, years + 1)),
@@ -531,33 +568,41 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_per_charger=float(ac_hw + ac_install),
         fixed_opex_per_charger_year=float(ac_mnt + ac_backend),
         connectors=int(ac_connectors),
-        power_kw=float(ac_power),
+        power_kw=float(ac_power),,
+        hours_per_day=float(hours_ac),
     )
     dc30_cost = TechCost(
         name="DC30",
         capex_per_charger=float(dc30_hw + dc30_install),
         fixed_opex_per_charger_year=float(dc30_mnt + dc30_backend),
         connectors=int(dc30_connectors),
-        power_kw=float(dc30_power),
+        power_kw=float(dc30_power),,
+        hours_per_day=float(hours_dc),
     )
     dc60_cost = TechCost(
         name="DC60",
         capex_per_charger=float(dc60_hw + dc60_install),
         fixed_opex_per_charger_year=float(dc60_mnt + dc60_backend),
         connectors=int(dc60_connectors),
-        power_kw=float(dc60_power),
+        power_kw=float(dc60_power),,
+        hours_per_day=float(hours_dc),
     )
     dc90_cost = TechCost(
         name="DC90",
         capex_per_charger=float(dc90_hw + dc90_install),
         fixed_opex_per_charger_year=float(dc90_mnt + dc90_backend),
         connectors=int(dc90_connectors),
-        power_kw=float(dc90_power),
+        power_kw=float(dc90_power),,
+        hours_per_day=float(hours_dc),
     )
 
     # Demand split year 1
     kwh_ac_year1 = float(dres.kwh_ac_per_day * 365.0)
     kwh_dc_year1 = float(dres.kwh_dc_per_day * 365.0)
+
+    # Prezzo medio (blended) in base al mix domanda AC/DC (Year 1)
+    tot_kwh = max(kwh_ac_year1 + kwh_dc_year1, 1e-9)
+    blended_sell_price = (float(sell_price_ac) * kwh_ac_year1 + float(sell_price_dc) * kwh_dc_year1) / tot_kwh
 
     opt_inp = OptimizationInputs(
         kwh_ac_year1=kwh_ac_year1,
@@ -568,7 +613,7 @@ Qui facciamo una **ricerca brute-force** su combinazioni AC/DC entro i vincoli e
         capex_budget=float(capex_budget - grid_connection_capex - signage_capex),
         years=int(years),
         discount_rate=float(discount_rate),
-        price_sell_eur_per_kwh=float(sell_price),
+        price_sell_eur_per_kwh=float(blended_sell_price),
         price_buy_eur_per_kwh=float(buy_price),
         kwh_growth_yoy=float(kwh_growth),
         variable_opex_per_kwh=float(variable_fee),
@@ -695,7 +740,8 @@ Puoi incollare qui l'URL *diretto* al CSV oppure caricare il file.
             "kwh_per_session_dc": kwh_per_session_dc,
             "uptime": uptime,
             "target_util": target_util,
-            "sell_price": sell_price,
+            "sell_price_ac": sell_price_ac,
+            "sell_price_dc": sell_price_dc,
             "buy_price": buy_price,
             "variable_fee": variable_fee,
             "years": years,
