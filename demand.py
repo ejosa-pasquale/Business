@@ -11,18 +11,6 @@ def demand_from_parking_model(
     share_dc: float = 0.25,
     days_per_year: int = 365,
 ) -> dict:
-    '''
-    Estimate annual demand (kWh/year) from parking traffic.
-
-    Inputs:
-      - daily_traffic: vehicles/day
-      - bev_share: fraction of vehicles that are BEV (0..1)
-      - charge_take_rate: fraction of BEV that choose to charge on site (0..1)
-      - kwh_per_session_ac/dc: average energy per charging session
-      - share_dc: fraction of charging sessions that are DC (0..1)
-
-    Output dict includes kWh/year, sessions/year split, etc.
-    '''
     daily_traffic = max(0.0, float(daily_traffic))
     bev_share = min(max(0.0, float(bev_share)), 1.0)
     charge_take_rate = min(max(0.0, float(charge_take_rate)), 1.0)
@@ -31,7 +19,6 @@ def demand_from_parking_model(
 
     bev_daily = daily_traffic * bev_share
     sessions_daily = bev_daily * charge_take_rate
-
     sessions_dc_daily = sessions_daily * share_dc
     sessions_ac_daily = sessions_daily * (1.0 - share_dc)
 
@@ -50,18 +37,7 @@ def demand_from_parking_model(
     }
 
 
-def demand_from_funnel_model(
-    bev_count: int,
-    kwh_per_bev_year: float,
-    public_share: float,
-    capture: float,
-) -> dict:
-    '''
-    Macro funnel:
-      total_kwh = bev_count * kwh_per_bev_year
-      public_kwh = total_kwh * public_share
-      site_kwh = public_kwh * capture
-    '''
+def demand_from_funnel_model(bev_count: int, kwh_per_bev_year: float, public_share: float, capture: float) -> dict:
     bev_count = max(0, int(bev_count))
     kwh_per_bev_year = max(0.0, float(kwh_per_bev_year))
     public_share = min(max(0.0, float(public_share)), 1.0)

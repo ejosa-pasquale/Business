@@ -1,146 +1,102 @@
+# optimizer.py - flat layout brute-force optimizer
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Dict, List, Tuple
+import pandas as pd
 
-import math
-
-from finance import FinanceInputs, evaluate_finance
+from sizing import suggest_mix_from_targets
+from finance import build_cashflows, npv, irr, payback_year
 
 
-@dataclass
-class TechCost:
-    capex_per_charger: float
-    fixed_opex_per_charger_year: float
-    connectors: int
-    power_kw: float
+def optimize_mix_bruteforce(
+    years: int,
+    discount_rate: float,
+    demand_kwh_year: float,
+    annual_growth_kwh: float,
+    sell_price_kwh: float,
+    energy_cost_kwh: float,
+    roaming_fee_pct: float,
+    ac_power_kw: float,
+    dc_power_kw: float,
+    ac_capex: float,
+    dc_capex: float,
+    ac_opex_year: float,
+    dc_opex_year: float,
+    fixed_capex: float,
+    fixed_opex_year: float,
+    uptime: float,
+    target_util: float,
+    share_dc: float,
+    site_power_kw: float,
+    capex_budget,
+    max_ac: int,
+    max_dc: int,
+):
+    rows = []
+    best = None
+    best_npv = None
 
-
-@dataclass
-class OptimizationInputs:
-    # Demand split
-    kwh_ac_year1: float
-    kwh_dc_year1: float
-
-    # Constraints
-    power_available_kw: float
-    capex_budget: float
-
-    # Financial common
-    years: int
-    discount_rate: float
-    price_sell_eur_per_kwh: float
-    price_buy_eur_per_kwh: float
-    kwh_growth_yoy: float
-    variable_opex_per_kwh: float
-    fixed_opex_overhead_year1: float
-    fixed_opex_overhead_growth_yoy: float
-
-    # Candidate ranges
-    max_ac: int
-    max_dc: int
-
-
-@dataclass
-class OptimizationResult:
-    n_ac: int
-    n_dc: int
-    capex: float
-    power_installed_kw: float
-    npv: float
-    irr: float
-    payback: float
-    notes: str
-
-
-def optimize_mix(
-    inp: OptimizationInputs,
-    ac: TechCost,
-    dc: TechCost,
-) -> Tuple[OptimizationResult, List[OptimizationResult]]:
-    results: List[OptimizationResult] = []
-
-    best: OptimizationResult | None = None
-
-    for n_ac in range(0, inp.max_ac + 1):
-        for n_dc in range(0, inp.max_dc + 1):
+    for n_ac in range(0, int(max_ac) + 1):
+        for n_dc in range(0, int(max_dc) + 1):
             if n_ac == 0 and n_dc == 0:
                 continue
 
-            power = n_ac * ac.power_kw + n_dc * dc.power_kw
-            if power > inp.power_available_kw + 1e-9:
+            power_req = n_ac * float(ac_power_kw) + n_dc * float(dc_power_kw)
+            if power_req > float(site_power_kw):
                 continue
 
-            capex = n_ac * ac.capex_per_charger + n_dc * dc.capex_per_charger
-            if capex > inp.capex_budget + 1e-9:
+            # Coverage check using target utilization capacity (approx)
+            sizing = suggest_mix_from_targets(
+                demand_kwh_year=demand_kwh_year,
+                share_dc=share_dc,
+                ac_power_kw=ac_power_kw,
+                dc_power_kw=dc_power_kw,
+                uptime=uptime,
+                target_util=target_util,
+                site_power_kw=site_power_kw,
+            )
+            # Require candidate to be at least as big as suggested (simple feasibility)
+            if n_ac < sizing["n_ac"] or n_dc < sizing["n_dc"]:
                 continue
 
-            # If you have demand split, assume AC serves kwh_ac and DC serves kwh_dc.
-            # If you install zero of one tech, re-route that demand to the other (with a penalty).
-            kwh_ac = inp.kwh_ac_year1
-            kwh_dc = inp.kwh_dc_year1
-            notes = ""
+            capex_total = n_ac * float(ac_capex) + n_dc * float(dc_capex) + float(fixed_capex)
+            if capex_budget is not None and float(capex_total) > float(capex_budget):
+                continue
 
-            if n_ac == 0 and kwh_ac > 0:
-                # reroute to DC but assume 15% drop due to mismatch
-                kwh_dc += 0.85 * kwh_ac
-                notes += "AC=0: domanda AC riversata su DC (−15%). "
-                kwh_ac = 0
-            if n_dc == 0 and kwh_dc > 0:
-                kwh_ac += 0.85 * kwh_dc
-                notes += "DC=0: domanda DC riversata su AC (−15%). "
-                kwh_dc = 0
-
-            kwh_total = kwh_ac + kwh_dc
-
-            fixed_opex_year1 = (
-                inp.fixed_opex_overhead_year1
-                + n_ac * ac.fixed_opex_per_charger_year
-                + n_dc * dc.fixed_opex_per_charger_year
-            )
-
-            fin_inp = FinanceInputs(
-                years=inp.years,
-                discount_rate=inp.discount_rate,
-                capex_total=capex,
-                price_sell_eur_per_kwh=inp.price_sell_eur_per_kwh,
-                price_buy_eur_per_kwh=inp.price_buy_eur_per_kwh,
-                kwh_sold_year1=kwh_total,
-                kwh_growth_yoy=inp.kwh_growth_yoy,
-                fixed_opex_year1=fixed_opex_year1,
-                fixed_opex_growth_yoy=inp.fixed_opex_overhead_growth_yoy,
-                variable_opex_per_kwh=inp.variable_opex_per_kwh,
-            )
-
-            fin_res, _ = evaluate_finance(fin_inp)
-
-            res = OptimizationResult(
+            cash = build_cashflows(
+                years=years,
+                demand_kwh_year=demand_kwh_year,
+                annual_growth_kwh=annual_growth_kwh,
+                sell_price_kwh=sell_price_kwh,
+                energy_cost_kwh=energy_cost_kwh,
+                roaming_fee_pct=roaming_fee_pct,
                 n_ac=n_ac,
                 n_dc=n_dc,
-                capex=capex,
-                power_installed_kw=power,
-                npv=fin_res.npv,
-                irr=fin_res.irr,
-                payback=fin_res.payback_year,
-                notes=notes.strip(),
+                opex_ac_year=ac_opex_year,
+                opex_dc_year=dc_opex_year,
+                fixed_opex_year=fixed_opex_year,
+                capex_total=capex_total,
             )
-            results.append(res)
+            npv_val = npv(cash["net_cashflow"], discount_rate)
+            irr_val = irr(cash["net_cashflow"])
+            pb = payback_year(cash["net_cashflow"])
 
-            if best is None or res.npv > best.npv:
-                best = res
+            row = {
+                "n_ac": n_ac,
+                "n_dc": n_dc,
+                "power_kw": power_req,
+                "capex_total": capex_total,
+                "npv": npv_val,
+                "irr": irr_val,
+                "payback": pb,
+            }
+            rows.append(row)
 
-    if best is None:
-        best = OptimizationResult(
-            n_ac=0,
-            n_dc=0,
-            capex=0.0,
-            power_installed_kw=0.0,
-            npv=float('-inf'),
-            irr=float('nan'),
-            payback=float('inf'),
-            notes="Nessuna combinazione rispetta i vincoli (potenza/budget).",
-        )
+            if best_npv is None or npv_val > best_npv:
+                best_npv = npv_val
+                best = row
 
-    # Sort results by NPV desc
-    results_sorted = sorted(results, key=lambda x: x.npv, reverse=True)
-    return best, results_sorted
+    if not rows:
+        return None
+
+    top = pd.DataFrame(rows).sort_values("npv", ascending=False).head(30).reset_index(drop=True)
+    return {"best": best, "top_table": top}

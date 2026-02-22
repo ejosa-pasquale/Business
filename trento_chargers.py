@@ -1,11 +1,11 @@
 # trento_chargers.py - flat layout helper for chargers dataset
-
 from __future__ import annotations
 
 import pandas as pd
+from typing import Optional, List, Dict
 
 
-def _col(df: pd.DataFrame, names: list[str]) -> str | None:
+def _col(df: pd.DataFrame, names: List[str]) -> Optional[str]:
     cols = {str(c).lower(): c for c in df.columns}
     for n in names:
         if n.lower() in cols:
@@ -18,17 +18,11 @@ def _col(df: pd.DataFrame, names: list[str]) -> str | None:
     return None
 
 
-def summarize_trento_chargers(df: pd.DataFrame) -> dict:
-    '''
-    Create a simple summary from a chargers dataset (CSV from Comune/OCM/etc).
-    Works with heterogeneous schemas by using best-effort column matching.
-    '''
+def summarize_trento_chargers(df: pd.DataFrame) -> Dict:
     if df is None or df.empty:
         return {"rows": 0}
 
-    out: dict = {"rows": int(len(df)), "columns": list(df.columns)}
-
-    # Try to infer key fields
+    out: Dict = {"rows": int(len(df)), "columns": list(df.columns)}
     power_col = _col(df, ["power", "potenza", "kw", "max_power_kw"])
     operator_col = _col(df, ["operator", "gestore", "provider", "brand"])
     status_col = _col(df, ["status", "stato", "available", "attiva"])
@@ -41,22 +35,14 @@ def summarize_trento_chargers(df: pd.DataFrame) -> dict:
             "median": float(p.median()) if p.notna().any() else None,
             "max": float(p.max()) if p.notna().any() else None,
         }
-
     if operator_col:
-        vc = df[operator_col].astype(str).value_counts().head(10)
-        out["top_operators"] = vc.to_dict()
-
+        out["top_operators"] = df[operator_col].astype(str).value_counts().head(10).to_dict()
     if status_col:
-        vc = df[status_col].astype(str).value_counts().head(10)
-        out["status_counts"] = vc.to_dict()
-
+        out["status_counts"] = df[status_col].astype(str).value_counts().head(10).to_dict()
     if type_col:
-        vc = df[type_col].astype(str).value_counts().head(10)
-        out["type_counts"] = vc.to_dict()
+        out["type_counts"] = df[type_col].astype(str).value_counts().head(10).to_dict()
 
-    # Lat/Lon availability
     lat_col = _col(df, ["lat", "latitude", "y"])
     lon_col = _col(df, ["lon", "lng", "longitude", "x"])
     out["has_coordinates"] = bool(lat_col and lon_col)
-
     return out
