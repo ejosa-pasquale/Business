@@ -375,7 +375,7 @@ with sizing_tab:
         with c1:
             start_sessions_day = st.number_input("Sessioni/giorno iniziali (auto che ricaricano)",
         key="sizing5_start_sessions", min_value=0.0, value=float(dres.sessions_per_day), step=1.0)
-            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", key="sizing5_share_dc", 0, 100, int(share_sessions_dc*100), step=5) / 100.0
+            share_dc_for_suggest = st.slider("Quota sessioni DC (%)", 0, 100, int(share_sessions_dc*100), step=5, key="sizing5_share_dc") / 100.0
         with c2:
             growth_yoy_suggest = st.slider("Crescita annua domanda (%)", key="sizing5_growth", 0.0, 80.0, 35.0, step=1.0) / 100.0
             years_suggest = st.selectbox("Orizzonte (anni)", key="sizing5_years", [3, 4, 5, 6, 7, 10], index=2)
