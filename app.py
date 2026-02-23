@@ -466,6 +466,8 @@ with quick_tab:
             "quick_n_dc90",
             "quick_use_calc_capex",
             "quick_capex_input",
+            "quick_sessions_day_user_set",
+            "quick_upstream_hash",
         ]:
             if k in st.session_state:
                 st.session_state.pop(k)
@@ -478,6 +480,25 @@ with quick_tab:
 
     q1, q2 = st.columns([1.1, 0.9])
 
+    # Sync automatico dei default Quick ROI con i dati "a monte" (es. Override veicoli/giorno)
+    # Streamlit mantiene i valori in session_state: aggiorniamo solo se l'utente NON ha modificato manualmente.
+    def _mark_quick_sessions_day_user_set():
+        st.session_state["quick_sessions_day_user_set"] = True
+
+    if dres is not None:
+        _new_hash = (
+            float(vehicles_per_day_est) if vehicles_per_day_est is not None else None,
+            float(bev_share),
+            float(share_bev_that_charge),
+            float(kwh_per_session_ac),
+            float(kwh_per_session_dc),
+            float(share_sessions_dc),
+        )
+        _old_hash = st.session_state.get("quick_upstream_hash")
+        if _old_hash != _new_hash and not st.session_state.get("quick_sessions_day_user_set", False):
+            st.session_state["quick_sessions_day"] = float(dres.sessions_per_day)
+        st.session_state["quick_upstream_hash"] = _new_hash
+
     with q1:
         st.markdown("#### 1) Domanda (semplice)")
         q_sessions_day = st.number_input(
@@ -486,6 +507,7 @@ with quick_tab:
             value=float(dres.sessions_per_day) if dres is not None else 10.0,
             step=1.0,
             key="quick_sessions_day",
+            on_change=_mark_quick_sessions_day_user_set,
             help=(
                 "Domanda giornaliera stimata. Se hai inserito i dati del parcheggio (veicoli/giorno, % BEV, % che ricarica), "
                 "questo valore viene pre-compilato come stima di sessioni/giorno."
