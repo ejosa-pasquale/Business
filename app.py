@@ -454,6 +454,28 @@ with quick_tab:
         "K.I.S.S - Keep it simple and stupid - Inserisci auto che ricaricano, investimento e (opzionale) un mix AC/DC; il tool calcola domanda, capacità, kWh venduti e ritorno."
     )
 
+    # Reset dei widget Quick ROI (Streamlit mantiene lo stato dei widget per key)
+    # Questo evita che i default derivati dai dati (es. veicoli/giorno → sessioni/giorno) restino "bloccati".
+    if st.button("🔄 Reset Quick ROI inputs", type="secondary", use_container_width=False):
+        for k in [
+            "quick_sessions_day",
+            "quick_share_dc",
+            "quick_n_ac",
+            "quick_n_dc30",
+            "quick_n_dc60",
+            "quick_n_dc90",
+            "quick_use_calc_capex",
+            "quick_capex_input",
+        ]:
+            if k in st.session_state:
+                st.session_state.pop(k)
+        st.rerun()
+
+    st.caption(
+        "Suggerimento: se hai toccato un input, Streamlit ne conserva il valore. "
+        "Usa il reset per riallineare i default derivati dai dati."
+    )
+
     q1, q2 = st.columns([1.1, 0.9])
 
     with q1:
@@ -464,6 +486,10 @@ with quick_tab:
             value=float(dres.sessions_per_day) if dres is not None else 10.0,
             step=1.0,
             key="quick_sessions_day",
+            help=(
+                "Domanda giornaliera stimata. Se hai inserito i dati del parcheggio (veicoli/giorno, % BEV, % che ricarica), "
+                "questo valore viene pre-compilato come stima di sessioni/giorno."
+            ),
         )
         q_share_dc = st.slider(
             "Quota sessioni DC (%)",
@@ -472,6 +498,10 @@ with quick_tab:
             value=int(share_sessions_dc * 100),
             step=5,
             key="quick_share_dc",
+            help=(
+                "Percentuale di sessioni effettuate su colonnine DC (ricarica veloce). "
+                "Il resto delle sessioni è considerato su AC. Influenza kWh/sessione e prezzo medio di vendita."
+            ),
         ) / 100.0
 
         q_kwh_req_year1 = (
@@ -487,13 +517,41 @@ with quick_tab:
 
         qa, qb, qc, qd = st.columns(4)
         with qa:
-            q_n_ac = st.number_input("AC22", min_value=0, value=4, step=1, key="quick_n_ac")
+            q_n_ac = st.number_input(
+                "AC22",
+                min_value=0,
+                value=4,
+                step=1,
+                key="quick_n_ac",
+                help="Numero di colonnine AC fino a 22 kW. Aumenta capacità annua (kWh vendibili) e CAPEX/OPEX.",
+            )
         with qb:
-            q_n_dc30 = st.number_input("DC30", min_value=0, value=0, step=1, key="quick_n_dc30")
+            q_n_dc30 = st.number_input(
+                "DC30",
+                min_value=0,
+                value=0,
+                step=1,
+                key="quick_n_dc30",
+                help="Numero di colonnine DC ~30 kW. Utile per soste medio-brevi; aumenta capacità e CAPEX/OPEX.",
+            )
         with qc:
-            q_n_dc60 = st.number_input("DC60", min_value=0, value=1, step=1, key="quick_n_dc60")
+            q_n_dc60 = st.number_input(
+                "DC60",
+                min_value=0,
+                value=1,
+                step=1,
+                key="quick_n_dc60",
+                help="Numero di colonnine DC ~60 kW. Compromesso tra tempi di ricarica e costi.",
+            )
         with qd:
-            q_n_dc90 = st.number_input("DC90", min_value=0, value=0, step=1, key="quick_n_dc90")
+            q_n_dc90 = st.number_input(
+                "DC90",
+                min_value=0,
+                value=0,
+                step=1,
+                key="quick_n_dc90",
+                help="Numero di colonnine DC ~90 kW. Aumenta molto la capacità ma con CAPEX/OPEX più alti.",
+            )
 
         # CAPEX calcolato (colonnine + costi sito)
         q_capex_calc = (
@@ -509,6 +567,10 @@ with quick_tab:
             "Usa CAPEX calcolato dal mix (altrimenti inserisco io l'investimento)",
             value=True,
             key="quick_use_calc_capex",
+            help=(
+                "Se attivo, il CAPEX totale è calcolato automaticamente dal mix di colonnine + costi sito (allaccio, segnaletica, ecc.). "
+                "Se disattivo, puoi inserire manualmente l'investimento totale."
+            ),
         )
         q_capex_input = st.number_input(
             "Investimento totale (CAPEX) (€)",
@@ -516,6 +578,7 @@ with quick_tab:
             value=float(q_capex_calc),
             step=5_000.0,
             key="quick_capex_input",
+            help="CAPEX totale del progetto (hardware + installazione + costi sito). Usato per NPV/IRR/payback.",
         )
         q_capex_total = float(q_capex_calc) if q_use_calc_capex else float(q_capex_input)
 
