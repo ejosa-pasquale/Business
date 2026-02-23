@@ -239,8 +239,8 @@ with st.sidebar:
     st.subheader("🛠️ Affidabilità & saturazione")
     uptime = st.slider("Uptime tecnico (%)", 85, 100, 97) / 100.0
     target_util = st.slider("Target utilizzo medio (anti-coda) (%)", 10, 90, 40) / 100.0
-    hours_ac = st.number_input("Ore operative/giorno per colonnina AC", min_value=1.0, max_value=24.0, value=24.0, step=1.0)
-    hours_dc = st.number_input("Ore operative/giorno per colonnina DC", min_value=1.0, max_value=24.0, value=24.0, step=1.0)
+    hours_ac = st.number_input("Ore operative/giorno per colonnina AC", min_value=1.0, max_value=24.0, value=12.0, step=1.0)
+    hours_dc = st.number_input("Ore operative/giorno per colonnina DC", min_value=1.0, max_value=24.0, value=12.0, step=1.0)
 
     st.subheader("💶 Prezzi & costi")
     sell_price_ac = st.number_input("Prezzo vendita AC (€/kWh)", min_value=0.20, value=0.50, step=0.01, format="%.2f")
