@@ -209,12 +209,12 @@ st.markdown(
 with st.sidebar:
     st.header("📍 Sito & Vincoli")
     site_name = st.text_input("Nome parcheggio / sito", value="Parcheggio — Trento")
-    total_spots = st.number_input("Posti totali parcheggio", min_value=10, value=300, step=10)
-    avg_stay_hours = st.slider("Sosta media (ore)", min_value=0.5, max_value=12.0, value=3.0, step=0.5)
+    total_spots = st.number_input("Posti totali parcheggio", min_value=10, value=200, step=10)
+    avg_stay_hours = st.slider("Sosta media (ore)", min_value=0.5, max_value=12.0, value=4.0, step=0.5)
 
     st.subheader("⚡ Vincoli tecnici")
-    power_available_kw = st.number_input("Potenza disponibile (kW)", min_value=10.0, value=250.0, step=10.0)
-    capex_budget = st.number_input("Budget CAPEX max (€)", min_value=5_000.0, value=250_000.0, step=10_000.0)
+    power_available_kw = st.number_input("Potenza disponibile (kW)", min_value=10.0, value=200.0, step=10.0)
+    capex_budget = st.number_input("Budget CAPEX max (€)", min_value=5_000.0, value=50_000.0, step=10_000.0)
 
     st.subheader("🧠 Modalità domanda")
     demand_mode = st.radio(
@@ -228,13 +228,13 @@ with st.sidebar:
     share_bev_that_charge = st.slider("Quota BEV che ricarica nel sito (%)", 0.0, 60.0, 18.0, step=1.0) / 100.0
 
     st.subheader("⏱️ Durata sessione")
-    avg_session_hours_ac = st.slider("Durata media sessione AC (h)", 0.5, 10.0, 2.5, step=0.5)
+    avg_session_hours_ac = st.slider("Durata media sessione AC (h)", 0.5, 10.0, 3.5, step=0.5)
     avg_session_hours_dc = st.slider("Durata media sessione DC (h)", 0.1, 2.0, 0.45, step=0.05)
 
     st.subheader("🔀 Mix domanda AC/DC")
     share_sessions_dc = st.slider("% sessioni su DC", 0, 100, 35, step=5) / 100.0
-    kwh_per_session_ac = st.number_input("kWh medi per sessione AC", min_value=2.0, value=18.0, step=1.0)
-    kwh_per_session_dc = st.number_input("kWh medi per sessione DC", min_value=5.0, value=32.0, step=1.0)
+    kwh_per_session_ac = st.number_input("kWh medi per sessione AC", min_value=2.0, value=20.0, step=1.0)
+    kwh_per_session_dc = st.number_input("kWh medi per sessione DC", min_value=5.0, value=35.0, step=1.0)
 
     st.subheader("🛠️ Affidabilità & saturazione")
     uptime = st.slider("Uptime tecnico (%)", 85, 100, 97) / 100.0
@@ -243,7 +243,7 @@ with st.sidebar:
     hours_dc = st.number_input("Ore operative/giorno per colonnina DC", min_value=1.0, max_value=24.0, value=24.0, step=1.0)
 
     st.subheader("💶 Prezzi & costi")
-    sell_price_ac = st.number_input("Prezzo vendita AC (€/kWh)", min_value=0.20, value=0.55, step=0.01, format="%.2f")
+    sell_price_ac = st.number_input("Prezzo vendita AC (€/kWh)", min_value=0.20, value=0.50, step=0.01, format="%.2f")
     sell_price_dc = st.number_input("Prezzo vendita DC (€/kWh)", min_value=0.20, value=0.75, step=0.01, format="%.2f")
     buy_price = st.number_input("Costo energia (€/kWh)", min_value=0.05, value=0.28, step=0.01, format="%.2f")
     variable_fee = st.number_input("OPEX variabile extra (€/kWh) — roaming/acquiring", min_value=0.0, value=0.03, step=0.01, format="%.2f")
@@ -255,21 +255,21 @@ with st.sidebar:
 
     st.subheader("🏗️ Costi unitari (editabili)")
     with st.expander("AC 22 kW (per colonnina)", expanded=True):
-        ac_power = st.number_input("Potenza nominale AC (kW)", min_value=3.0, value=22.0, step=1.0)
+        ac_power = st.number_input("Potenza nominale AC (kW)", min_value=3.0, value=11.0, step=1.0)
         ac_connectors = st.number_input("Connettori per colonnina AC", min_value=1, value=2, step=1)
         ac_hw = st.number_input("Hardware AC (€)", min_value=500.0, value=2_000.0, step=100.0)
-        ac_install = st.number_input("Installazione + opere AC (€)", min_value=500.0, value=2_500.0, step=100.0)
-        ac_opex_year = st.number_input("OPEX fisso AC (€/anno per colonnina)", min_value=0.0, value=300.0, step=50.0)
-        ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=120.0, step=10.0)
-        ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=180.0, step=10.0)
+        ac_install = st.number_input("Installazione + opere AC (€)", min_value=500.0, value=3_000.0, step=100.0)
+        ac_opex_year = st.number_input("OPEX fisso AC (€/anno per colonnina)", min_value=0.0, value=100.0, step=50.0)
+        ac_mnt = st.number_input("Manutenzione annua AC (€/a)", min_value=0.0, value=100.0, step=10.0)
+        ac_backend = st.number_input("Backend/CSMS annuo per colonnina AC (€/a)", min_value=0.0, value=50.0, step=10.0)
 
     st.caption("Per confrontare tecnologie diverse, qui separiamo le DC in 3 taglie (30/60/90 kW).")
 
     with st.expander("DC 30 kW (per colonnina)", expanded=True):
         dc30_power = st.number_input("Potenza nominale DC30 (kW)", min_value=20.0, value=30.0, step=5.0)
         dc30_connectors = st.number_input("Connettori per colonnina DC30", min_value=1, value=1, step=1)
-        dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=7_000.0, step=1_000.0)
-        dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=5_000.0, step=1_000.0)
+        dc30_hw = st.number_input("Hardware DC30 (€)", min_value=5_000.0, value=8_000.0, step=1_000.0)
+        dc30_install = st.number_input("Installazione + opere DC30 (€)", min_value=2_000.0, value=6_000.0, step=1_000.0)
         dc30_opex_year = st.number_input("OPEX fisso DC30 (€/anno per colonnina)", min_value=0.0, value=600.0, step=50.0)
         dc30_mnt = st.number_input("Manutenzione annua DC30 (€/a)", min_value=0.0, value=900.0, step=50.0)
         dc30_backend = st.number_input("Backend/CSMS annuo per colonnina DC30 (€/a)", min_value=0.0, value=420.0, step=20.0)
@@ -278,19 +278,19 @@ with st.sidebar:
         dc60_power = st.number_input("Potenza nominale DC60 (kW)", min_value=40.0, value=60.0, step=5.0)
         dc60_connectors = st.number_input("Connettori per colonnina DC60", min_value=1, value=2, step=1)
         dc60_hw = st.number_input("Hardware DC60 (€)", min_value=10_000.0, value=20_000.0, step=1_000.0)
-        dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=5_000.0, step=1_000.0)
-        dc60_opex_year = st.number_input("OPEX fisso DC60 (€/anno per colonnina)", min_value=0.0, value=700.0, step=50.0)
-        dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=1_100.0, step=50.0)
-        dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=420.0, step=20.0)
+        dc60_install = st.number_input("Installazione + opere DC60 (€)", min_value=3_000.0, value=6_000.0, step=1_000.0)
+        dc60_opex_year = st.number_input("OPEX fisso DC60 (€/anno per colonnina)", min_value=0.0, value=300.0, step=50.0)
+        dc60_mnt = st.number_input("Manutenzione annua DC60 (€/a)", min_value=0.0, value=100.0, step=50.0)
+        dc60_backend = st.number_input("Backend/CSMS annuo per colonnina DC60 (€/a)", min_value=0.0, value=100.0, step=20.0)
 
     with st.expander("DC 90 kW (per colonnina)", expanded=True):
         dc90_power = st.number_input("Potenza nominale DC90 (kW)", min_value=60.0, value=90.0, step=5.0)
         dc90_connectors = st.number_input("Connettori per colonnina DC90", min_value=1, value=2, step=1)
         dc90_hw = st.number_input("Hardware DC90 (€)", min_value=15_000.0, value=35_000.0, step=1_000.0)
         dc90_install = st.number_input("Installazione + opere DC90 (€)", min_value=4_000.0, value=8_000.0, step=1_000.0)
-        dc90_opex_year = st.number_input("OPEX fisso DC90 (€/anno per colonnina)", min_value=0.0, value=800.0, step=50.0)
-        dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=1_250.0, step=50.0)
-        dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=420.0, step=20.0)
+        dc90_opex_year = st.number_input("OPEX fisso DC90 (€/anno per colonnina)", min_value=0.0, value=300.0, step=50.0)
+        dc90_mnt = st.number_input("Manutenzione annua DC90 (€/a)", min_value=0.0, value=100.0, step=50.0)
+        dc90_backend = st.number_input("Backend/CSMS annuo per colonnina DC90 (€/a)", min_value=0.0, value=100.0, step=20.0)
 
     st.subheader("🧱 CAPEX extra sito")
     grid_connection_capex = st.number_input(
@@ -300,14 +300,14 @@ with st.sidebar:
         step=5_000.0,
         help="Inserisci una stima unica (MVP). In v1 puoi passare a range + Monte Carlo.",
     )
-    signage_capex = st.number_input("Segnaletica + stalli dedicati (CAPEX)", min_value=0.0, value=6_000.0, step=500.0)
+    signage_capex = st.number_input("Segnaletica + stalli dedicati (CAPEX)", min_value=0.0, value=500.0, step=500.0)
 
     st.subheader("🧾 OPEX fissi di sito")
     overhead_opex = st.number_input(
         "Overhead annuo (assicurazioni, pulizia, call center, affitto/royalty)",
         min_value=0.0,
-        value=6_000.0,
-        step=500.0,
+        value=1_000.0,
+        step=100.0,
     )
     overhead_growth = st.slider("Crescita OPEX fissi YoY (%)", 0.0, 10.0, 2.0, step=0.5) / 100.0
 
@@ -451,7 +451,7 @@ quick_tab, sizing_tab, finance_tab, strategy_tab, data_tab = st.tabs(
 with quick_tab:
     st.markdown("### Quick ROI — input semplici → ritorno investimento")
     st.caption(
-        "Schermata semplificata per utenti non tecnici. Inserisci auto che ricaricano, investimento e (opzionale) un mix AC/DC; il tool calcola domanda, capacità, kWh venduti e ritorno."
+        "K.I.S.S - Keep it simple and stupid - Inserisci auto che ricaricano, investimento e (opzionale) un mix AC/DC; il tool calcola domanda, capacità, kWh venduti e ritorno."
     )
 
     q1, q2 = st.columns([1.1, 0.9])
@@ -491,7 +491,7 @@ with quick_tab:
         with qb:
             q_n_dc30 = st.number_input("DC30", min_value=0, value=0, step=1, key="quick_n_dc30")
         with qc:
-            q_n_dc60 = st.number_input("DC60", min_value=0, value=2, step=1, key="quick_n_dc60")
+            q_n_dc60 = st.number_input("DC60", min_value=0, value=1, step=1, key="quick_n_dc60")
         with qd:
             q_n_dc90 = st.number_input("DC90", min_value=0, value=0, step=1, key="quick_n_dc90")
 
