@@ -398,7 +398,7 @@ else:
 
     with f1:
         st.markdown("Inserisci un funnel semplice: BEV → kWh annui → quota pubblico → quota cattura sito.")
-        bev_2030 = st.number_input("BEV (Provincia di Trento) target anno base", min_value=0, value=30_000, step=1_000)
+        bev_2030 = st.number_input("BEV target anno base", min_value=0, value=30_000, step=1_000)
         kwh_per_bev_year = st.number_input("Consumo medio annuo per BEV (kWh/anno)", min_value=500.0, value=3_000.0, step=100.0)
         public_share = st.slider("Quota ricarica pubblica (%)", 0, 100, 30, step=5) / 100.0
         capture_share = st.slider("Quota cattura sito (%)", 0.1, 20.0, 4.0, step=0.5) / 100.0
