@@ -146,7 +146,7 @@ def build_quick_roi_pdf_report(
     return pdf
 
 
-st.set_page_config(page_title="Pallaoro Group Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="Business Center EV Charging — ROI & Sizing Tool", layout="wide", page_icon="⚡")
 
 st.markdown("""
 <style>
@@ -196,8 +196,8 @@ st.markdown(
 st.markdown(
     """
 <div class="hero">
-  <h1>⚡ Pallaoro Group EV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
-  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) installare in un parcheggio a Trento: domanda → sizing → business case → raccomandazione.</p>
+  <h1>⚡ Business Center eV Charging — ROI, CAPEX/OPEX, Strategia & Sizing</h1>
+  <p>Valuta quante colonnine AC (fino 22 kW) e DC (fino 120 kW) servono: domanda → sizing → business case → raccomandazione.</p>
 </div>
 """,
     unsafe_allow_html=True,
